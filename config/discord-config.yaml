@@ -1,0 +1,10 @@
+# Discord configuration for Waypoint bot
+# Add this to ~/.hermes/config.yaml under the discord: key
+
+discord:
+  require_mention: true        # MUST be true — direct channel messages are silently dropped
+  free_response_channels: ''   # Leave empty
+  allowed_channels: ''         # Leave empty (allows all)
+  auto_thread: true            # Creates threads for each conversation
+  channel_prompts:
+    '#waypoint': 'Vehicle data collection mode active. Parse natural language input for vehicle/jobs/parts/procedures/inventory/time tracking. Use vehicle_db.py for database operations. Confirm every action in chat. Keep responses concise.'

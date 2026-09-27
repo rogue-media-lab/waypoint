@@ -1,0 +1,19 @@
+make: "Buick"
+model: "Encore"
+year: 2019
+engine: "E-B 4-C 1.4L (83) TURBO [B] LUV"
+
+# The Specific Variables
+oil_filter_part: "POF-5839 or POF-9177"
+air_filter_part: "PAF6319"
+air_filter_price: 35.99
+cabin_filter_part: "PCF-6154C"
+cabin_filter_price: 49.99
+oil_capacity: "4.2 quarts"
+oil_viscosity: "0W-30"
+drain_plug_torque: "10.3 ft/lb (approx 14 Nm)"
+
+# Specific Instructions (The "Deltas")
+skid_plate_instructions: "N/A"
+special_inspection_note: "N/A"
+oil_reset_instructions: "Try general GM reset procedure."
