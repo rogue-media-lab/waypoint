@@ -1,20 +1,71 @@
 # Waypoint
 
-Shop-floor vehicle service tracking system for independent auto technicians.
-SQLite-backed CLI for VIN decoding, job recording, labor time management, and
-hours reporting. Designed for hands-free Discord use on the shop floor.
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](#license)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![SQLite](https://img.shields.io/badge/sqlite-3-blue.svg)](https://www.sqlite.org/)
+[![Discord-ready](https://img.shields.io/badge/discord-ready-5865F2.svg)](https://discord.com/)
+[![No LLM required](https://img.shields.io/badge/AI-none-success.svg)](#architecture)
+[![Hand-built at Midas](https://img.shields.io/badge/built%20at-Midas%2C%20Rock%20Hill%20SC-orange.svg)](#about)
+
+> **Hands-free, sub-second shop-floor service tracking for independent auto techs.**
+> SQLite-backed CLI. Voice-friendly via Discord. No cloud, no LLM, no API keys, no subscriptions.
+
+[What it does](#what-it-does) · [Quick start](#quick-start) · [CLI reference](#cli-reference) · [Schema](#database-schema) · [Cron watchdog](#automated-job-check-cron) · [Pitfalls](#critical-pitfalls) · [License](#license)
+
+## See it in action
+
+```
+$ @Waypoint record 2019 Subaru Outback, oil change
+✓ 2019 Subaru Outback — new vehicle created (id 16)
+✓ Job DEMO-0021 opened: Oil change
+
+$ @Waypoint complete job DEMO-0021 0.4
+✓ Logged 24 minutes. Job complete. Miles: 86,000.
+
+$ @Waypoint how long control arms Ford Escape 2018
+✓ Control Arm R&R (Suspension) — 3.0 hrs (Ford Escape 2013–2019)
+```
+
+Sub-second. Hands-free. No context switching.
+
+## Why Waypoint?
+
+Shop management software is stuck in the browser. Cloud-based. Built for the
+front counter, not the bay. By the time you've clicked through three modals
+to log a 0.4-hour oil change, your customer's waiting.
+
+Waypoint is the opposite: a CLI you can speak to over Discord, backed by
+SQLite on your laptop. Every action is one command. Every result is instant.
+No subscriptions. No rate limits. No AI hallucinating labor times.
+
+It's not a web app. It's a tool for the floor.
 
 ## What It Does
 
 - **VIN decoding** via free NHTSA API (no API key)
 - **Vehicle CRUD** — find-or-create with VIN deduplication
-- **Job lifecycle** — open -> active -> complete (with labor time in minutes)
+- **Job lifecycle** — open → active → complete (with labor time in minutes)
 - **Labor time reference** — lookup, add, update standard book times
 - **Parts tracking** — add parts to jobs with cost/supplier
 - **Procedures** — document step-by-step work with difficulty ratings
 - **Inventory** — stock levels with reorder thresholds
 - **Hours reporting** — weekly summary (Mon-Sat) with goal tracking
 - **Automated job check** — cron watchdog that posts morning/hourly/EOD briefings to Discord
+
+## Quick start
+
+Three commands to a working demo:
+
+```bash
+git clone git@github.com:rogue-media-lab/waypoint.git
+cd waypoint
+WAYPOINT_DB=./database/seed_vehicle_data.db python3 scripts/vehicle_db.py recent-jobs
+```
+
+You should see 20 synthetic jobs print out as JSON. To use your own data,
+copy `database/seed_vehicle_data.db` to `~/.hermes/data/vehicle_data.db`
+or run `python3 scripts/vehicle_db.py init` against an empty file. See
+[Installation](#installation) for the full setup.
 
 ## Architecture
 
@@ -175,7 +226,7 @@ After config changes, restart the gateway:
 hermes gateway restart
 ```
 
-## CLI Commands
+## CLI Reference
 
 All commands: `python3 ~/.hermes/scripts/vehicle_db.py <command> [args...]`
 
@@ -354,3 +405,23 @@ between Waypoint (command-driven, instant) and CarUs (conversation-driven, AI-me
 ## License
 
 MIT — free to use, modify, and redistribute. See `LICENSE` (not yet committed; add one if you need the full text).
+
+## About
+
+Waypoint is the system I (Mason) built and use daily at the Midas in Rock
+Hill, SC. It's hand-rolled, single-author, and shaped entirely by real
+shop-floor constraints: headset on, hands greasy, customer waiting. Every
+command in the CLI reference above was added because I needed it on a
+specific car, on a specific day.
+
+This repo is the public-facing, PII-stripped version. The internal copy
+has 119 vehicles and a few hundred real jobs behind it. The structure,
+the schema, the cron, the pitfalls — all of that came from real use. If
+something here is rough around the edges, that's because it had to ship
+to the bay first and get polished later.
+
+If you're an independent tech who's tired of fighting Tekmetric to log
+a brake job, this might be useful. PRs welcome — keep it SQLite, keep
+it instant, keep it voice-friendly.
+
+— Mason, Rogue Media Lab
