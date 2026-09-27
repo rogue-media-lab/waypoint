@@ -10,7 +10,7 @@
 > **Hands-free, sub-second shop-floor service tracking for independent auto techs.**
 > SQLite-backed CLI. Voice-friendly via Discord. No cloud, no LLM, no API keys, no subscriptions.
 
-[What it does](#what-it-does) · [Quick start](#quick-start) · [CLI reference](#cli-reference) · [Schema](#database-schema) · [Cron watchdog](#automated-job-check-cron) · [Pitfalls](#critical-pitfalls) · [License](#license)
+[What it does](#what-it-does) · [Quick start](#quick-start) · [CLI reference](#cli-reference) · [Schema](#database-schema) · [Cron watchdog](#automated-job-check-cron) · [Pitfalls](#critical-pitfalls) · [License](#license) · **[For AI agents: AGENTS.md](./AGENTS.md)**
 
 ## See it in action
 
@@ -425,3 +425,10 @@ a brake job, this might be useful. PRs welcome — keep it SQLite, keep
 it instant, keep it voice-friendly.
 
 — Mason, Rogue Media Lab
+
+## For AI agents
+
+If you're an AI agent setting this up (Hermes, OpenClaw, Claude Code,
+or anything that can shell out), read [AGENTS.md](./AGENTS.md) first —
+it covers installation paths, the CLI-as-API contract, schema quick-ref,
+and pitfalls that humans never hit but agents will.
