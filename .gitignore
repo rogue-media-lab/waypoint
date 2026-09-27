@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+*.swp
+*.swo
+*~
+
+# Local data overrides (keep the shipped seed DB, ignore local copies)
+database/vehicle_data.db
+*.db-journal
+*.db-wal
+
+# Local photo / image cache paths never belong in the repo
+*.local-photos

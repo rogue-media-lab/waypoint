@@ -1,0 +1,4 @@
+ford: "Turn the key to the on position. Depress both the brake pedal and the gas pedal at the same time. A count down timer or message should indicate the reset in progress. Should confirm reset when complete."
+honda: "Older honda has a key way in the cluster. Insert the tip of the key to reset the indicator. Turn the key to the on position. Select trip A. Turn the key to the off position. Hold down the trip selector and turn the key to the on position. A indicator will count down to show reset. If maintenance does not reset with trip A, repeat procedure for trip B."
+toyota: "With the key off, hold the trip selector and turn the key to the on position. A countdown indicator will show reset."
+gm: "Turn the key to the on position. Depress the gas pedal fully to the floor board, 5 times within 10 seconds of turning the key to the on position."
