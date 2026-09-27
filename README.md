@@ -404,7 +404,7 @@ between Waypoint (command-driven, instant) and CarUs (conversation-driven, AI-me
 
 ## License
 
-MIT — free to use, modify, and redistribute. See `LICENSE` (not yet committed; add one if you need the full text).
+MIT — see [LICENSE](./LICENSE) for the full text. Copyright (c) 2026 Mason Roberts.
 
 ## About
 
