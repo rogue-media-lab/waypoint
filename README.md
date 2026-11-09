@@ -62,7 +62,8 @@ cd waypoint
 WAYPOINT_DB=./database/seed_vehicle_data.db python3 scripts/vehicle_db.py recent-jobs
 ```
 
-You should see 20 synthetic jobs print out as JSON. To use your own data,
+You should see real shop jobs print out as JSON — service history from a
+working bay, with VINs replaced and every customer identifier stripped. To use your own data,
 copy `database/seed_vehicle_data.db` to `~/.hermes/data/vehicle_data.db`
 or run `python3 scripts/vehicle_db.py init` against an empty file. See
 [Installation](#installation) for the full setup.
@@ -113,7 +114,7 @@ waypoint/
 │   ├── vehicle_db.py                  ← main CLI (all database operations)
 │   └── waypoint_job_check.py          ← cron watchdog (auto briefings)
 ├── database/
-│   ├── seed_vehicle_data.db          ← committed demo DB (synthetic data, no PII)
+│   ├── seed_vehicle_data.db          ← committed demo DB (sanitised shop data, no PII)
 │   └── schema.sql                     ← schema-only dump (for fresh installs)
 ├── skills/
 │   ├── waypoint-service-jobs/         ← Hermes skill: record/complete jobs
@@ -157,7 +158,7 @@ cd waypoint
 
 ### 2. Set Up Database
 
-**Option A — Use the shipped demo database (synthetic data, safe to inspect):**
+**Option A — Use the shipped demo database (sanitised shop data, safe to inspect):**
 ```bash
 mkdir -p ~/.hermes/data
 cp database/seed_vehicle_data.db ~/.hermes/data/vehicle_data.db
@@ -169,10 +170,14 @@ mkdir -p ~/.hermes/data
 sqlite3 ~/.hermes/data/vehicle_data.db < database/schema.sql
 ```
 
-> **Privacy note:** The committed `database/seed_vehicle_data.db` contains only
-> synthetic demo records — no real customer names, phone numbers, addresses,
-> or VINs. The `database/vehicle_data.db` filename is gitignored so your own
-> live database never accidentally commits. To point the CLI at a non-default
+> **Privacy note:** The committed `database/seed_vehicle_data.db` is real
+> shop data with identity removed: the `customers` table is gone, `customer_id`
+> is nulled, VINs are replaced with `DEMO…` placeholders, and names, phone
+> numbers and street addresses are redacted out of every free-text column by
+> `scripts/waypoint_export_cloud.py`. That script re-scans its own output and
+> refuses to write a database that still trips a detector. The
+> `database/vehicle_data.db` filename is gitignored so your own live database
+> never accidentally commits. To point the CLI at a non-default
 > location (e.g. for testing), set the `WAYPOINT_DB` environment variable:
 > `WAYPOINT_DB=/tmp/test.db python3 scripts/vehicle_db.py recent-jobs`.
 
@@ -414,8 +419,9 @@ shop-floor constraints: headset on, hands greasy, customer waiting. Every
 command in the CLI reference above was added because I needed it on a
 specific car, on a specific day.
 
-This repo is the public-facing, PII-stripped version. The internal copy
-has 119 vehicles and a few hundred real jobs behind it. The structure,
+This repo is the public-facing, PII-stripped version. The committed seed is
+an export of the live shop database — 148 vehicles and 250 jobs — with the
+customer table dropped, VINs replaced and free text scrubbed. The structure,
 the schema, the cron, the pitfalls — all of that came from real use. If
 something here is rough around the edges, that's because it had to ship
 to the bay first and get polished later.

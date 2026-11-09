@@ -42,7 +42,7 @@ waypoint/
 │   ├── vehicle_db.py           ← main CLI — every operation goes here
 │   └── waypoint_job_check.py   ← cron watchdog (zero-LLM)
 ├── database/
-│   ├── seed_vehicle_data.db    ← synthetic demo (15 vehicles, 20 jobs)
+│   ├── seed_vehicle_data.db    ← sanitised export (148 vehicles, 250 jobs, no PII)
 │   └── schema.sql              ← DDL for fresh installs
 ├── skills/
 │   ├── waypoint-service-jobs/SKILL.md
@@ -68,7 +68,9 @@ python3 scripts/vehicle_db.py recent-jobs
 ```
 
 For demos / sandboxing, copy `database/seed_vehicle_data.db` to your
-`WAYPOINT_DB` location and skip step 2. The seed has 0 customer PII.
+`WAYPOINT_DB` location and skip step 2. The seed has 0 customer PII — it is
+real shop data with the customer table dropped, VINs replaced by `DEMO…`
+placeholders, and names/phones/addresses redacted from free text.
 
 ## CLI Reference (condensed)
 
