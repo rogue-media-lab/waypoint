@@ -22,23 +22,96 @@ $ @Waypoint record 2019 Subaru Outback, oil change
 $ @Waypoint complete job DEMO-0021 0.4
 ✓ Logged 24 minutes. Job complete. Miles: 86,000.
 
-$ @Waypoint how long control arms Ford Escape 2018
+$ @Waypoint What is the labor to replace the control arms on a Ford Escape 2018
 ✓ Control Arm R&R (Suspension) — 3.0 hrs (Ford Escape 2013–2019)
 ```
+
+## Jobs Report
+
+Two views of the same data: the list you pull when you want to check something,
+and the nudge that shows up on its own.
+
+```bash
+$ python3 scripts/vehicle_db.py recent-jobs
+[
+  {
+    "id": 246,
+    "job_number": "226",
+    "description": "Front brakes",
+    "status": "complete",
+    "year": 2018,
+    "make": "NISSAN",
+    "model": "Altima"
+  },
+  {
+    "id": 247,
+    "job_number": "227",
+    "description": "Oil change",
+    "status": "complete",
+    "year": 2018,
+    "make": "NISSAN",
+    "model": "Altima"
+  },
+  {
+    "id": 248,
+    "job_number": "228",
+    "description": "Headlight bulb replacement (pair)",
+    "status": "complete",
+    "year": 2018,
+    "make": "CHEVROLET",
+    "model": "Tahoe"
+  },
+  ... 7 more
+]
+```
+
+The hourly report is the one that keeps the day moving. `waypoint_job_check.py`
+runs on cron, builds the text below from the database, and posts it to Discord —
+no LLM, no tokens, no API call except the weather:
+
+```bash
+$ python3 scripts/waypoint_job_check.py
+**WAYPOINT — Monday 10:50 AM**
+65°F Clear, wind 2mph | H 74° / L 40°
+----------
+⏱ **Hours:** 0.0/27 billed — 27.0 to go (4.5/day needed over 6 days)
+----------
+**Services this week:**
+  ⬜ Oil Change
+  ⬜ Tire Rotation
+  ⬜ Coolant Flush
+  ⬜ Brake Flush
+  ⬜ Power Steering Flush
+  ⬜ Transmission Flush
+  ⬜ Alignment
+  ⬜ Battery Service
+----------
+**Open Jobs (1):**
+  • 2018 FORD Escape — 219: Head gasket replacement
+```
+
+It changes shape by time of day: start of day adds weather and the held-over jobs
+from previous days, hourly stays compact, and the 6 PM run flags anything still
+open as a carry-over. `vehicle_db.py weekly` returns the same hours as JSON when
+you want to compute with them instead of read them.
+
+Both blocks above are the real output of the shipped `database/seed_vehicle_data.db`.
+The seed is a historical snapshot, so the current week reads 0.0 billed until you
+log work yourself.
 
 Sub-second. Hands-free. No context switching.
 
 ## Why Waypoint?
 
-Shop management software is stuck in the browser. Cloud-based. Built for the
-front counter, not the bay. By the time you've clicked through three modals
-to log a 0.4-hour oil change, your customer's waiting.
+I am an automotive technician working at a common chain. We do general maintenance on all major vehicle makes and models in the US. Anything from oil changes to heavy engine work or transmission swaps.
 
-Waypoint is the opposite: a CLI you can speak to over Discord, backed by
-SQLite on your laptop. Every action is one command. Every result is instant.
-No subscriptions. No rate limits. No AI hallucinating labor times.
+We have [AllData](https://www.alldata.com/us/en) and [Identifix](https://www.identifix.com/). The shop POS also has ready vehicle specs that we rely on. This is not intended to replace those services, but it will grow with the tech the more it is used.
 
-It's not a web app. It's a tool for the floor.
+It was created to help me better perform in the shop environment by being a personal assistant to me. I wanted two things initially. One, I wanted help with the vehicle I was working on. What are the torque specs for the water pump or the oil filter number. Often I was knee deep when I wanted this info. I wanted something I could talk with for this information. From diagnostics to general specs. Two, I wanted to keep track of hours and services I did in the shop. The shop runs on services like alignments and flushes. All important to the vehicle health as well as important metrics for the shop. I wanted to be reminded once an hour of the work I have done and what I had to look forward to. This was a nice way to drive my day.
+
+This repo is the concept as it is built. This is an AI assistant for the tech using [Hermes](https://hermes-agent.nousresearch.com/). I have [Hermes](https://hermes-agent.nousresearch.com/docs) on my laptop at home. I use the Hermes [gateway](https://hermes-agent.nousresearch.com/docs/user-guide/messaging/) to connect Waypoint to a [Discord](https://discord.com/) server that I created specifically for this. At work I can take a picture of the vin plate of the vehicle in Discord. Waypoint will decode the vehicle and give me back that information. Using a local SQL database, it will keep track of the information I ask for or give it, while working on the vehicle. It lets me know if I have seen it before and what I noticed or did the last time I had it. It uses OpenRouter with an API key for the brain (LLM). Typically run on DeepSeek V4.1 Flash with thinking on high or medium. GLM 5.2 or GLM 5.3 are also good, inexpensive models for this. Typically I put around $10.00 in the account and always have room left in the tank.
+
+Waypoint uses many custom python scripts (tools) to work better for you and save on tokens. When called it uses the brain to use these tools to give you the information you request. The more you use it, the more information you give it, the more helpful it can be to you. With Discord I can speak directly with Waypoint, either through a chat channel or in the text box, making this hands free.
 
 ## What It Does
 
