@@ -113,6 +113,13 @@ This repo is the concept as it is built. This is an AI assistant for the tech us
 
 Waypoint uses many custom python scripts (tools) to work better for you and save on tokens. When called it uses the brain to use these tools to give you the information you request. The more you use it, the more information you give it, the more helpful it can be to you. With Discord I can speak directly with Waypoint, either through a chat channel or in the text box, making this hands free.
 
+This configures Waypoint to answer to an @mention. Following these instructions,
+you address it as @waypoint in Discord. That default suits a server that already
+has traffic: invite it into a working or established server and it stays quiet
+until it is called. On an empty or private server you can set
+`require_mention: false` in the profile's `config.yaml` and talk to Waypoint
+without mentioning the bot.
+
 ## What It Does
 
 - **VIN decoding** via free NHTSA API (no API key)
@@ -347,7 +354,7 @@ Then add this to the profile's `config.yaml` (`hermes --profile waypoint config 
 
 ```yaml
 discord:
-  require_mention: true        # MUST be true — direct channel messages are silently dropped
+  require_mention: true        # false = talk in-channel; true = must @mention (see note above)
   free_response_channels: ''   # Leave empty
   allowed_channels: ''         # Leave empty (allows all)
   auto_thread: true           # Creates threads for each conversation
@@ -355,9 +362,10 @@ discord:
     '#waypoint': 'Vehicle data collection mode active. Parse natural language input for vehicle/jobs/parts/procedures/inventory/time tracking. Use vehicle_db.py for database operations. Confirm every action in chat. Keep responses concise.'
 ```
 
-**Critical:** `require_mention` must be `true`. The only working pattern is:
-open a thread in #waypoint, then @mention the bot. Direct channel messages
-(do not open a thread) are silently dropped by Discord.
+The setup above assumes `require_mention: true`: open a thread in #waypoint,
+then @mention the bot. That is the pattern this was built and tested against, and
+it keeps each conversation in its own thread. With `require_mention: false` you
+can talk in the channel directly instead of opening a thread.
 
 After config changes, restart that profile's gateway:
 ```bash
@@ -519,7 +527,8 @@ open -> active -> complete
 ## Critical Pitfalls
 
 1. **`complete` takes minutes, not hours.** Passing `1.0` records 1 minute.
-2. **`require_mention: true` is mandatory.** Direct channel messages are silently dropped.
+2. **Mind `require_mention`.** With `true`, an unmentioned message is silently dropped —
+   open a thread and @mention the bot. With `false`, the bot answers in-channel.
 3. **COALESCE(end_date, start_date)** — many completed jobs have NULL `end_date`.
    Always use COALESCE in hours queries or totals will be wrong.
 4. **Never guess VINs from unreadable photos.** If NHTSA decode returns
