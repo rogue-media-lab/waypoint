@@ -19,9 +19,12 @@ every detector against it.
 
 WHAT IT DOES
 ------------
-  1. Copies every table EXCEPT `customers` (the PII table is omitted wholesale).
+  1. Copies every table EXCEPT `customers` (the PII table) and `decode_cache`
+     (cached NHTSA JSON keyed by real VINs).
   2. Nulls `vehicles.customer_id` (the link is meaningless without the table,
-     and retaining it would permit re-linking if ids ever leaked).
+     and retaining it would permit re-linking if ids ever leaked) and replaces
+     `vehicles.vin` with a DEMO placeholder (a VIN is a lookup key to the
+     registered owner through public records).
   3. Scrubs phones, emails, street addresses, state+ZIP, and person names from
      every free-text column.
   4. Re-scans the OUTPUT and fails loudly if any detector still matches.
@@ -83,6 +86,10 @@ DETECTORS = {
         r"((?i:Service writer|Writer|Advisor|Tech|Technician)\s*[:\-]\s*)"
         r"([A-Z][a-z'.-]+(?:\s+[A-Z][a-z'.-]+){0,2})"
     ),
+    # VINs pasted into notes and spec fields. The structured `vehicles.vin`
+    # column is handled separately (replaced at seed build); free text is not.
+    # Charset excludes I/O/Q, so synthetic DEMO… placeholders never match.
+    "vin": re.compile(r"\b[A-HJ-NPR-Z0-9]{17}\b"),
     # local filesystem paths carry the operator's home directory into a public
     # repo and tell a reader nothing useful — the photo itself is not shipped
     "local_path": re.compile(r"(?:/home/[^\s,;)\]]+|/Users/[^\s,;)\]]+|[A-Za-z]:\\\\[^\s,;)\]]+)"),
@@ -158,11 +165,14 @@ SCRUB_COLUMNS = {
     "inventory": ["part_name", "supplier", "shelf_location", "notes"],
     "inventory_transactions": ["notes"],
     "photos": ["description", "file_path"],
-    "vehicle_specs": ["additional_specs"],
+    "vehicle_specs": ["additional_specs", "sources"],
 }
 
 # tables that must never reach the cloud
-EXCLUDED_TABLES = {"customers"}
+# customers = the PII table. decode_cache = cached NHTSA JSON keyed by
+# real VINs, which would put the VINs straight back into the "clean" copy.
+# spec_jobs = a VIN -> spec mapping; without VINs the table is meaningless.
+EXCLUDED_TABLES = {"customers", "decode_cache", "spec_jobs"}
 
 
 def scrub_text(text, customer_names):
@@ -278,7 +288,11 @@ def main():
     for t in tables:
         cols = [r[1] for r in sc.execute(f"PRAGMA table_info({t})")]
         rows = sc.execute(f"SELECT * FROM {t}").fetchall()
-        scrub_cols = [c for c in SCRUB_COLUMNS.get(t, []) if c in cols]
+        # every column is scanned, not a hand-maintained allowlist: the allowlist
+        # kept missing columns (differential_specs.notes, vehicle_specs.sources)
+        # and the verifier caught the miss only after the fact. `vin` is replaced
+        # wholesale above, and it is the only column a detector must not touch.
+        scrub_cols = [c for c in cols if c != "vin"]
 
         placeholders = ",".join("?" * len(cols))
         for row in rows:
@@ -295,13 +309,17 @@ def main():
                         for d in fired:
                             detector_tally[d] = detector_tally.get(d, 0) + 1
             # null the customer link — no customers table in the cloud copy
-            if t == "vehicles" and "customer_id" in cols:
-                vals[cols.index("customer_id")] = None
+            if t == "vehicles":
+                if "customer_id" in cols:
+                    vals[cols.index("customer_id")] = None
+                if "vin" in cols:
+                    i = cols.index("vin")
+                    vals[i] = f"DEMO{row['id']:013d}" if vals[i] else None
             dc.execute(f"INSERT INTO {t} ({','.join(cols)}) VALUES ({placeholders})", vals)
             if touched:
                 scrubbed_rows += 1
 
-        print(f"  {t:<24} {len(rows):>4} rows   {'scrubbed: ' + ','.join(scrub_cols) if scrub_cols else 'no text columns'}")
+        print(f"  {t:<24} {len(rows):>4} rows   {len(scrub_cols)} text columns scanned")
 
     # carry indexes/triggers that don't reference the excluded table
     for typ in ("index", "trigger"):
