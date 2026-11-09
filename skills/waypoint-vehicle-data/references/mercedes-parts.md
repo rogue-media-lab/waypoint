@@ -26,9 +26,26 @@
 | 2010-2013 | E-Class (W212) | A 211 830 00 18 | CUK 24 300 |
 | 2014-2016 | E-Class (W212) | A 213 830 00 18 | CUK 24 300-2 |
 
+## Keyless-Go Antennas — W205 / X166 / X253
+
+| Part | Platform | Position | Notes |
+|------|----------|----------|-------|
+| A 205 905 30 05 | W205, X166 (GLS), X253 (GLC) | Multi-position | Catalog position: Rear, Left. Supersedes 166 820 00 75. OEM only — no aftermarket. ~$30 new, ~$11 used. |
+
+Positions the same module fills: center console, console storage tray, cockpit,
+under rear seat center, left rear door, right rear door, left luggage compartment,
+right luggage compartment, rear bumper. On the X166 the rear-door units fit either
+side. Symptom-to-position map lives in `parts-lookup.md`.
+
+Install notes (left rear door, X166, shop-verified): two torque bolts hold the
+panel — one behind the speaker grille, one behind the interior door handle. The
+wire loom gives ample working room once the panel is off.
+
 ## Quick Lookup Notes
 
-- **VIN prefix "WDD"** = Mercedes-Benz (German plant)
+- **VIN prefixes:** "WDD" = Mercedes-Benz built in Germany, "4JG" = Mercedes-Benz
+  SUV (GL/GLS) built in the US, "4J" = Mercedes-Benz passenger car built in the
+  US. Do not infer make from the prefix — always `decode-vin`.
 - **10th character** = year code (N=2011, P=2012, etc.)
 - OEM parts more expensive but guaranteed fit
 - Mann Filter = quality aftermarket, usually cheaper

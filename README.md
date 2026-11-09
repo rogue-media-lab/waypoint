@@ -144,24 +144,26 @@ or run `python3 scripts/vehicle_db.py init` against an empty file. See
 ## Architecture
 
 ```
-                  Discord #waypoint (thread + @mention)
-                              |
-                              v
-                    Hermes Agent (gateway)
-                              |
-                    +---------+---------+
-                    |                   |
-            vehicle_db.py         waypoint_job_check.py
-            (CLI — all ops)        (cron — auto briefings)
-                    |                   |
-                    +---+---------------+
-                        |
-                vehicle_data.db (SQLite)
-                        |
-                +-------+-------+
-                |               |
-            labor_times     vehicle_specs
-            (book times)    (CarUs YAML)
+                 Discord #waypoint (thread + @mention)
+                             |
+                             v
+             Hermes gateway - Waypoint's own profile,
+             own bot token, own system prompt
+                             |
+        +--------------------+---------------------+
+        |                    |                     |
+   vehicle_db.py     waypoint_job_check.py   helper scripts
+   (CLI, all ops)    (cron, hourly report)    (spec ingestion,
+        |                    |                 filter crossref,
+        +----------+---------+                 VIN enrichment)
+                   |
+          vehicle_data.db (SQLite, 28 tables)
+                   |
+        +----------+------------+
+        |                       |
+   book times              specs library
+   (labor_times)           (transmission, fluid, torque,
+                            filter, battery, DTC)
 ```
 
 ### Data Flow
@@ -185,7 +187,28 @@ waypoint/
 ├── .gitignore
 ├── scripts/
 │   ├── vehicle_db.py                  ← main CLI (all database operations)
-│   └── waypoint_job_check.py          ← cron watchdog (auto briefings)
+│   ├── waypoint_job_check.py          ← cron watchdog (hourly report)
+│   ├── waypoint_export_cloud.py       ← PII-free export gate (produces the seed)
+│   ├── waypoint_intake.py             ← VIN plate / invoice ingestion
+│   ├── waypoint_enrich_vin.py         ← NHTSA decode + spec fill
+│   ├── waypoint_batch_specs.py        ← bulk spec backfill
+│   ├── waypoint_backfill_engine_codes.py
+│   ├── waypoint_backfill_filters.py
+│   ├── waypoint_engine_refine.py
+│   ├── waypoint_coverage.py           ← spec coverage audit
+│   ├── waypoint_range_audit.py        ← year-range sanity audit
+│   ├── spec_research.py               ← spec sourcing
+│   ├── canonicalize_specs.py
+│   ├── amsoil_resolve.py              ← AMSOIL fluid lookup
+│   ├── amsoil_fetch_save.py
+│   ├── diff_extract.py                ← differential spec extraction
+│   ├── filter_extract.py
+│   ├── filter_crossref_setup.py
+│   ├── filter_report.py
+│   └── config_ranges_setup.py
+│
+│   (plus one-off migration runners kept for history: waypoint_generations.py,
+│    waypoint_rerun_resolved.py, waypoint_engine_split_test.py)
 ├── database/
 │   ├── seed_vehicle_data.db          ← committed demo DB (sanitised shop data, no PII)
 │   └── schema.sql                     ← schema-only dump (for fresh installs)
@@ -362,26 +385,32 @@ All commands: `python3 ~/.hermes/scripts/vehicle_db.py <command> [args...]`
 SQLite database at `~/.hermes/data/vehicle_data.db`. See `database/schema.sql`
 for the full DDL. Key tables:
 
-| Table | Purpose |
-|-------|---------|
-| `vehicles` | Year/make/model/VIN/trim/customer info |
-| `jobs` | Service jobs with status, labor time, dates |
-| `job_parts` | Parts used on a job (cost, supplier) |
-| `procedures` | Step-by-step documentation per job |
-| `vehicle_specs` | Oil capacity, fluid types, torque specs |
-| `labor_times` | Standard book times (global + vehicle-specific) |
-| `inventory` | Parts on hand with reorder thresholds |
-| `inventory_transactions` | Stock in/out/adjustment log |
-| `job_time_entries` | Granular time tracking per technician |
-| `photos` | Photo references (job/inventory/vehicle/damage) |
+28 tables, grouped by job:
+
+| Group | Tables |
+|-------|--------|
+| Service record | `vehicles`, `jobs`, `job_parts`, `procedures`, `job_time_entries`, `photos` |
+| Shop ops | `labor_times`, `inventory`, `inventory_transactions`, `plate_history`, `identity_audit` |
+| Specs library | `vehicle_specs`, `spec_jobs`, `transmission_specs`, `fluid_specs`, `fluid_applications`, `torque_specs`, `differential_specs`, `battery_specs`, `battery_groups`, `config_ranges`, `filter_crossref`, `filter_stock`, `transmission_aliases` |
+| Diagnostics | `dtc_library`, `dtc_events` |
+| Customer identity | `customers` — empty in the shipped seed |
+| Cache | `decode_cache` — never exported (keyed by real VINs) |
+
+The specs library is the part that compounds: every vehicle you work on adds
+fluid capacities, torque values, filter numbers and DTC history that the next
+job on that platform can use. `spec_jobs` links a spec set to the VIN that
+verified it.
 
 ### Current Data
 
-- 94 vehicles
-- 136 jobs
-- 51 labor time references
-- 12 job parts
-- 14 procedures
+Shipped seed, 2,577 rows total:
+
+- 148 vehicles (VINs replaced with `DEMO…` placeholders)
+- 250 jobs
+- 79 labor time references
+- 73 job parts, 85 procedures, 14 time entries
+- 135 spec rows plus 1,769 transmission/fluid/filter/config rows
+- 0 customer rows
 
 ## Automated Job Check (Cron)
 

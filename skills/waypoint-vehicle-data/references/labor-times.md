@@ -1,10 +1,16 @@
 # Labor Times Reference
 
 All entries are now in the `labor_times` SQLite table. This file is the
-human-readable mirror. Run `python3 ~/.hermes/scripts/vehicle_db.py labor-list`
+human-readable mirror. Run `python3 ~/.hermes/profiles/waypoint/scripts/vehicle_db.py labor-list`
 to see the live database values.
 
+**These are Mason's shop rates.** When he states a different time in chat, his
+number wins — write it to the table *and* patch the affected jobs, then update
+this file. Do not adjust a stated rate toward a published guide value.
+
 Last full audit: June 2026 (11 entries added, all performed services now covered).
+Brake flush, engine air filter, cabin air filter, and fuel additive rates were
+re-stated by the user and now reflect his numbers, not generic estimates.
 
 ## Maintenance
 
@@ -21,7 +27,7 @@ Last full audit: June 2026 (11 entries added, all performed services now covered
 |---------|-------|-------|-------|
 | Brake Pads - Front | 1.0 | 3 | |
 | Brake Pads - Rear | 1.0 | 4 | |
-| Brake Flush | 1.0 | 19 | Full brake fluid flush |
+| Brake Flush | 0.5 | 74 | Full brake fluid flush — user-stated rate |
 | Brake Fluid Exchange | 0.6 | 27 | Exchange (not full flush) |
 
 ## Cooling
@@ -33,6 +39,15 @@ Last full audit: June 2026 (11 entries added, all performed services now covered
 | Thermostat | 0.8 | 9 | |
 | Water Pump | 2.0 | 8 | |
 
+## Filters & Fluids
+
+| Service | Hours | DB id | Notes |
+|---------|-------|-------|-------|
+| Engine air filter | 0.3 | 39 | User-stated rate |
+| Cabin air filter | 0.4 | 40 | User-stated rate; not a 0.1 job |
+| Brake Fluid Exchange | 0.6 | 27 | Exchange (not full flush) |
+| Fuel additive (jewels) | 0.0 | 75 | Service performed, **no billable labor** — record the job with `time_in_minutes=NULL`, never cancel it |
+
 ## Suspension / Tires
 
 | Service | Hours | DB id | Notes |
@@ -41,6 +56,9 @@ Last full audit: June 2026 (11 entries added, all performed services now covered
 | Mount and Balance (single) | 0.2 | 23 | Single tire |
 | Mount and Balance (set) | 0.5 | 24 | Full set |
 | Lower Ball Joints — Front (pair) | 5.0 | — | 2012 Tahoe reference: 5.0 hrs remove & replace both |
+| Front Struts R&R (both) | 2.5 | 64 | User-stated rate (2005 Ford Focus, Oct 2026). 2.5 is the TOTAL for both struts, not per side — overrides the earlier 2.2 guide value |
+| Inner and Outer Tie Rod Ends (both) | 2.5 | 77 | User-stated rate (2005 Ford Focus, Oct 2026). 2.5 is the TOTAL for inner + outer, both sides, not per side |
+| Front Sway Bar Links (both) | 0.5 | 78 | Estimate only, NOT user-stated — Mason does not bill sway links as a separate line; they roll into the front-work total. 0.5 was carried on the 2005 Focus job at his tolerance only |
 | Brake Inspection / Evaluation (per axle) | 0.2 | — | 0.4 hrs for front + rear combined |
 
 ## Electrical
@@ -56,6 +74,7 @@ Last full audit: June 2026 (11 entries added, all performed services now covered
 | Service | Hours | DB id | Notes |
 |---------|-------|-------|-------|
 | Timing Belt | 2.5 | 10 | |
+| Head Gasket Replacement | 22.0 | 84 | User-stated rate (2018 Ford Escape 2.0 EcoBoost) — "roughly 22 hours." A quote at job open, not a performed time; confirm the actual before closing the job |
 | Camshaft Position Sensor R&I (Single) | 0.5 | 14 | |
 | Camshaft Position Sensor R&I (Both) | 0.8 | 15 | |
 | Camshaft Position Sensor R&I (4 cyl) | 0.4 | 16 | |
@@ -100,10 +119,19 @@ sqlite3 ~/.hermes/data/vehicle_data.db "UPDATE jobs SET time_in_minutes=300 WHER
 ## Rule: Every Completed Job Must Have Time
 
 A completed job with NULL or zero `time_in_minutes` is invisible to all hours queries.
-When recording a job as complete, always supply the labor time. Use `labor-lookup`
+When recording a job as complete, always supply the labor time — EXCEPT for services
+that carry no billable labor, and work another shop performed before the vehicle
+arrived, both of which are correctly NULL. Use `labor-lookup`
 to find the standard time if unsure:
 
 ```bash
-python3 ~/.hermes/scripts/vehicle_db.py labor-lookup "alignment"
-python3 ~/.hermes/scripts/vehicle_db.py complete <job_id> <minutes>
+python3 ~/.hermes/profiles/waypoint/scripts/vehicle_db.py labor-lookup "alignment"
+python3 ~/.hermes/profiles/waypoint/scripts/vehicle_db.py complete <job_id> <minutes>
 ```
+
+## Rule: Job IDs Come From the Job Command
+
+`complete` only accepts an id that a `job` call just returned. Invented ids fail with
+`Job N not found`. Create all the jobs for a multi-service batch first, collect the
+ids from that output, then complete them. Re-running `job` to recover from a bad id
+creates duplicate open jobs.

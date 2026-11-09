@@ -8,7 +8,7 @@ Location: `~/.hermes/waypoint/vehicles.json`
 {
   "vehicles": [
     {
-      "vin": "EXAMPLE000000VIN0",
+      "vin": "SAMPLE000000VIN00",
       "year": 2018,
       "make": "Dodge",
       "model": "Journey",

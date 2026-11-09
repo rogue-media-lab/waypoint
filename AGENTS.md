@@ -169,7 +169,7 @@ These aren't in the README because humans don't hit them:
 
 ## Schema quick reference
 
-10 tables. See [database/schema.sql](./database/schema.sql) for the full DDL.
+28 tables. See [database/schema.sql](./database/schema.sql) for the full DDL.
 
 | Table | Purpose |
 |---|---|
@@ -197,7 +197,7 @@ WAYPOINT_DB=./database/seed_vehicle_data.db python3 scripts/vehicle_db.py stats
 
 # Schema is valid
 sqlite3 "$WAYPOINT_DB" "SELECT name FROM sqlite_master WHERE type='table';" | wc -l
-# Expect: 11 (10 tables + sqlite_sequence)
+# Expect: 29 (28 tables + sqlite_sequence)
 ```
 
 ## Where to go next

@@ -14,11 +14,13 @@ Never read markdown files, never estimate, never recall from memory.
 Always use this — it applies correct work-week bounds and COALESCE logic:
 
 ```bash
-python3 ~/.hermes/scripts/vehicle_db.py weekly
+python3 ~/.hermes/profiles/waypoint/scripts/vehicle_db.py weekly
 ```
 
 Returns JSON with: `work_week`, `total_hours`, `total_minutes`, `jobs_completed`,
-`hours_goal` (27), `hours_remaining`, `goal_met`, and `job_breakdown` per job
+`hours_goal` (27), `hours_remaining`, `goal_met`, `banked_hours` / `banked_jobs`
+(book time on unfinished jobs, with `performed_hours` each), `position_hours`
+(done + banked, informational), and `job_breakdown` per job
 (with `date`, `vehicle`, `description`, `minutes`, `hours`).
 
 ## Work Week Definition
@@ -27,6 +29,19 @@ Returns JSON with: `work_week`, `total_hours`, `total_minutes`, `jobs_completed`
 - **Pay period:** Saturday 6 PM to Friday 6 PM — different concept, rarely needed
 - When user says "hours this week" → use work week (Mon–Sat)
 - On Sunday → returns previous Mon–Sat window
+
+## Three hour numbers — never mix them
+
+| Number | Column | Means | Counts toward 27 goal |
+|---|---|---|---|
+| **Billed / done** | `jobs.time_in_minutes` (status complete) | actual time worked on closed jobs — what Mason gets paid for | **yes** |
+| **Banked** | `jobs.booked_minutes` (status open/active) | quoted book time the customer will be charged on jobs not finished | **no — never** |
+| **Performed on open work** | `SUM(job_time_entries.duration_minutes)` | actual time spent so far on an unfinished job | no |
+
+- The goal is 27 **paid** hours a week. Banked hours are money quoted, not money earned — adding them to the goal lets him claim a week he has not been paid for. Mason's rule, stated directly.
+- `weekly` returns all three: `total_hours`, `banked_hours` / `banked_jobs` (with `performed_hours` per job), and `position_hours` (done + banked, informational only).
+- When asked "how many hours this week," report billed as the answer, and mention banked only if a job is in progress or he asks where the unfinished work sits.
+- Never sum `booked_minutes` into a weekly total, and never report `booked_minutes` as hours worked.
 
 ## Locating a specific job
 
@@ -42,7 +57,8 @@ When the user says "this job" or asks for hours on a single job:
    JOIN vehicles v ON j.vehicle_id = v.id
    WHERE j.description LIKE '%<fragment>%';
    ```
-4. The child `job_time_entries` table exists but may be empty. The aggregate `jobs.time_in_minutes` is the authoritative total for hours queries.
+4. The child `job_time_entries` table may hold per-segment rows for jobs tracked live from Discord (see `waypoint-service-jobs` → "Live Clock — Mid-Job Progress and Time Segments"). Those segments are the audit trail; the aggregate `jobs.time_in_minutes` written at completion is still the authoritative total for hours queries — `weekly` reads only `jobs`. If the two disagree on a completed job, the job row wins and the segment sum is what you reconcile against.
+5. Break time is never counted: segments are closed on pause and a new segment opens on resume, so `SUM(duration_minutes)` excludes downtime while `MAX(start_time) - MIN(start_time)` does not. Never derive hours from the first `start_time`.
 
 ## Direct SQL (fallback if vehicle_db.py unavailable)
 
@@ -78,17 +94,24 @@ saturday = (now - timedelta(days=days_back) + timedelta(days=5)).strftime('%Y-%m
 
 ## CLI Pitfalls
 
-- **`vehicle_db.py --help` does not work.** The script accepts positional commands only. Known commands: `weekly`, `labor-lookup <service>`, `complete`, `find-or-create`, `job`, `decode-vin`, `job-details`.
+- **`vehicle_db.py --help` does not work.** The script accepts positional commands only. Known commands: `weekly`, `labor-lookup <service>`, `complete`, `find-or-create`, `job [--booked <hours>]`, `book <job_id> <hours>`, `decode-vin`, `job-details`, `active-jobs`.
 - **Recording jobs is also handled by `vehicle_db.py`.** See the `waypoint-service-jobs` skill for the full CLI workflow (decode VIN → find-or-create vehicle → add job → complete with time). The old advice to use raw `sqlite3` is obsolete.
 
 ## Data Quality: Jobs With No Time
 
-Every completed job must have `time_in_minutes > 0`. A completed job with NULL or 0 time
-is invisible to all hours queries. If you detect one:
+Every job **Mason was paid for** must have `time_in_minutes > 0`. A completed job with
+NULL or 0 time is invisible to all hours queries. If you detect one:
 
+0. **Read its notes first.** Two categories are deliberately NULL and must not be
+   "fixed": warranty/comeback work and another shop's prior work. Backfilling hours onto
+   either invents pay he never earned and silently corrupts the week's total. The notes
+   start with `WARRANTY COMEBACK` or name the outside shop; see `waypoint-vehicle-data`
+   → "Pattern: Warranty / Comeback Work" and "Pattern: Work From Another Shop".
 1. Identify the service from the job description
-2. Look up standard time: `python3 ~/.hermes/scripts/vehicle_db.py labor-lookup <service>`
-3. Apply it: `python3 ~/.hermes/scripts/vehicle_db.py complete <job_id> <minutes>`
+2. Look up standard time: `python3 ~/.hermes/profiles/waypoint/scripts/vehicle_db.py labor-lookup <service>`
+3. Apply it with direct SQL on the already-closed row — re-running `complete` on a closed
+   job is write-once and would restamp `end_date`:
+   `sqlite3 ~/.hermes/data/vehicle_data.db "UPDATE jobs SET time_in_minutes=<minutes> WHERE id=<job_id>;"`
 
 **Known fixed:** Job #26 (Toyota Highlander Alignment, 2026-06-05) — was NULL, set to 60 min.
 
@@ -104,4 +127,12 @@ Jun 8      2021 Ram 1500         Oil Change + Rot.  1.0
 ...
 ──────────────────────────────────────────
 Total: X.X hrs / 27 goal  (Y.Y to go)
+Banked: 22.0 hr — 219 Head gasket (in progress)
 ```
+
+**When he questions a report number, answer with the column each line reads, not the label.**
+`Hours: X/27 billed` is the sum of `time_in_minutes` over completed jobs; `Money: … of X hr`
+is NOT a second hour count — it is the paid / loaned / untagged split of those same hours.
+Two lines that look like two totals get read as a duplicate or a missing figure; naming the
+source column settles it in one sentence. Same for a missing job: if hours are absent, check
+`status` first — an unfinished job is Banked, never Hours.

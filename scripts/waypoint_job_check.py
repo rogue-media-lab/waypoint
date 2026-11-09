@@ -19,10 +19,7 @@ import urllib.request
 import json
 from datetime import datetime, timedelta
 
-DB_PATH = os.environ.get(
-    "WAYPOINT_DB",
-    os.path.expanduser("~/.hermes/data/vehicle_data.db"),
-)
+DB_PATH = os.path.expanduser("~/.hermes/data/vehicle_data.db")
 LAT, LON = 34.99, -81.03  # Rock Hill, SC
 
 # Service checklist — ordered for display
@@ -162,9 +159,10 @@ def get_active_jobs():
     c = conn.cursor()
     c.execute("""
         SELECT j.id, j.job_number, j.description, j.status, j.start_date,
-               j.priority, v.year, v.make, v.model, v.customer_name
+               j.priority, v.year, v.make, v.model, cu.name AS customer_name
         FROM jobs j
         JOIN vehicles v ON j.vehicle_id = v.id
+        LEFT JOIN customers cu ON v.customer_id = cu.id
         WHERE j.status IN ('open', 'active')
         ORDER BY
             CASE j.priority
@@ -191,9 +189,10 @@ def get_held_over_jobs():
     c = conn.cursor()
     c.execute("""
         SELECT j.id, j.job_number, j.description, j.status, j.start_date,
-               j.priority, v.year, v.make, v.model, v.customer_name
+               j.priority, v.year, v.make, v.model, cu.name AS customer_name
         FROM jobs j
         JOIN vehicles v ON j.vehicle_id = v.id
+        LEFT JOIN customers cu ON v.customer_id = cu.id
         WHERE j.status IN ('open', 'active')
           AND DATE(j.start_date) < ?
         ORDER BY j.start_date ASC
@@ -241,17 +240,131 @@ def get_weather():
 # Shared block builders
 # ---------------------------------------------------------------------------
 
+def get_weekly_payment_split():
+    """
+    Paid vs loaned hours for this work week. WORKED is not the same as PAID:
+    a completed job can be performed and still unpaid indefinitely (customer
+    financing a repair, shop withholding until the customer pays). The hours
+    block counts what was DONE; this splits it into what was PAID FOR.
+
+    Returns (hours_by_bucket, count_by_bucket). Degrades to empty if the
+    payment_status column does not exist yet, so an old DB cannot break the report.
+    """
+    monday, saturday = get_work_week_bounds()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    try:
+        c.execute("""
+            SELECT COALESCE(payment_status, '(unrecorded)') AS bucket,
+                   COUNT(*) AS n,
+                   COALESCE(SUM(time_in_minutes), 0) AS mins
+            FROM jobs
+            WHERE status = 'complete'
+              AND time_in_minutes IS NOT NULL
+              AND time_in_minutes > 0
+              AND DATE(COALESCE(end_date, start_date)) >= ?
+              AND DATE(COALESCE(end_date, start_date)) <= ?
+            GROUP BY bucket
+        """, (monday, saturday))
+        rows = c.fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    conn.close()
+    hours = {r["bucket"]: round(r["mins"] / 60, 2) for r in rows}
+    counts = {r["bucket"]: r["n"] for r in rows}
+    return hours, counts
+
+
+def payment_block(hours):
+    """One line showing how much of the week's work was actually paid for."""
+    buckets, counts = get_weekly_payment_split()
+    if not buckets:
+        return None
+    paid   = buckets.get("paid", 0.0)
+    loaned = buckets.get("loaned", 0.0)
+    unrec  = buckets.get("(unrecorded)", 0.0)
+
+    parts = []
+    if paid:   parts.append(f"{paid:.1f} paid")
+    if loaned: parts.append(f"{loaned:.1f} LOANED")
+    if unrec:  parts.append(f"{unrec:.1f} untagged")
+    if not parts:
+        return None
+
+    line = f"💰 **Money:** {' | '.join(parts)} of {hours:.1f} hr"
+    if unrec:
+        line += f" ({counts.get('(unrecorded)', 0)} job(s) have no payment status)"
+    elif loaned and paid <= 0:
+        line += " — none of this week is paid yet"
+    return line
+
+
+def get_banked_jobs():
+    """
+    Book time sitting in jobs that are NOT finished yet — the quoted hours the
+    customer will be charged. This is banked money, not hours worked, so it is
+    reported on its own line and never added to the 27-hour goal. Degrades to an
+    empty list if the booked_minutes column does not exist yet.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute("""
+            SELECT j.job_number, j.description, j.booked_minutes,
+                   COALESCE((SELECT SUM(e.duration_minutes) FROM job_time_entries e
+                             WHERE e.job_id = j.id), 0) AS performed_minutes
+            FROM jobs j
+            WHERE j.status IN ('open', 'active')
+              AND j.booked_minutes IS NOT NULL
+              AND j.booked_minutes > 0
+            ORDER BY j.booked_minutes DESC
+        """).fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def banked_block(hours, banked):
+    """Banked (quoted, uncollected) hours line + week position. None if nothing banked."""
+    if not banked:
+        return None
+    total = sum(j["booked_minutes"] for j in banked) / 60
+    parts = []
+    for j in banked:
+        jid = j["job_number"] or "?"
+        desc = (j["description"] or "").split("(")[0].strip()
+        if len(desc) > 32:
+            desc = desc[:31].rstrip() + "…"
+        if len(banked) == 1:
+            parts.append(f"{jid} {desc} (in progress)")
+        else:
+            parts.append(f"{jid} {desc} — {j['booked_minutes'] / 60:.1f} hr")
+    line = f"🏦 **Banked:** {total:.1f} hr — " + "; ".join(parts)
+    position = f"📈 **Position:** {hours:.1f} done + {total:.1f} banked = {hours + total:.1f} hr _(goal counts done only)_"
+    return line + "\n" + position
+
+
 def hours_block(hours, job_count):
     monday, saturday = get_work_week_bounds()
     if hours >= HOURS_GOAL:
         over = round(hours - HOURS_GOAL, 1)
-        return f"✅ **Hours:** {hours:.1f}/27 billed — goal met (+{over} over)"
+        head = f"✅ **Hours:** {hours:.1f}/27 billed — goal met (+{over} over)"
     else:
         remaining = round(HOURS_GOAL - hours, 1)
         days_left = _work_days_remaining()
         per_day = round(remaining / days_left, 1) if days_left > 0 else remaining
         pace = f"{per_day}/day needed over {days_left} day{'s' if days_left != 1 else ''}" if days_left > 0 else "last day — push it"
-        return f"⏱ **Hours:** {hours:.1f}/27 billed — {remaining} to go ({pace})"
+        head = f"⏱ **Hours:** {hours:.1f}/27 billed — {remaining} to go ({pace})"
+    lines = [head]
+    bb = banked_block(hours, get_banked_jobs())
+    if bb:
+        lines.append(bb)
+    pay = payment_block(hours)
+    if pay:
+        lines.append(pay)
+    return "\n".join(lines)
 
 
 def _work_days_remaining():
