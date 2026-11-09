@@ -26,6 +26,12 @@ $ @Waypoint What is the labor to replace the control arms on a Ford Escape 2018
 ✓ Control Arm R&R (Suspension) — 3.0 hrs (Ford Escape 2013–2019)
 ```
 
+![A Waypoint thread in Discord](pictures/screenshots/discord-thread.png)
+
+A job from a plain message: the bot opens a thread per vehicle, books the labor
+before I start, takes the oil spec when I read it off the hood, and closes the job
+when I say it is done. No forms.
+
 ## Jobs Report
 
 Two views of the same data: the list you pull when you want to check something,
@@ -94,6 +100,8 @@ It changes shape by time of day: start of day adds weather and the held-over job
 from previous days, hourly stays compact, and the 6 PM run flags anything still
 open as a carry-over. `vehicle_db.py weekly` returns the same hours as JSON when
 you want to compute with them instead of read them.
+
+![The hourly report in Discord](pictures/screenshots/discord-hourly-report.png)
 
 Both blocks above are the real output of the shipped `database/seed_vehicle_data.db`.
 The seed is a historical snapshot, so the current week reads 0.0 billed until you
