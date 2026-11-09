@@ -83,6 +83,9 @@ DETECTORS = {
         r"((?i:Service writer|Writer|Advisor|Tech|Technician)\s*[:\-]\s*)"
         r"([A-Z][a-z'.-]+(?:\s+[A-Z][a-z'.-]+){0,2})"
     ),
+    # local filesystem paths carry the operator's home directory into a public
+    # repo and tell a reader nothing useful — the photo itself is not shipped
+    "local_path": re.compile(r"(?:/home/[^\s,;)\]]+|/Users/[^\s,;)\]]+|[A-Za-z]:\\\\[^\s,;)\]]+)"),
 }
 
 # --- detector guards -------------------------------------------------------
@@ -154,7 +157,7 @@ SCRUB_COLUMNS = {
     "labor_times": ["notes"],
     "inventory": ["part_name", "supplier", "shelf_location", "notes"],
     "inventory_transactions": ["notes"],
-    "photos": ["description"],
+    "photos": ["description", "file_path"],
     "vehicle_specs": ["additional_specs"],
 }
 
@@ -338,7 +341,7 @@ def main():
                 val = row[c]
                 if not isinstance(val, str) or not val:
                     continue
-                for name, _m in _hits(val):
+                for _s, _e, name in _hits(val):
                     leaks.append((t, c, name, row["id"] if "id" in cols else "?"))
                 for full in customer_names:
                     if len(full) >= 4 and re.search(r"\b" + re.escape(full) + r"\b", val, re.I):
