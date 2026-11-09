@@ -252,7 +252,27 @@ git clone git@github.com:rogue-media-lab/waypoint.git
 cd waypoint
 ```
 
-### 2. Set Up Database
+### 2. Create the Waypoint profile
+
+Waypoint does not install into your default Hermes agent. It runs as its own
+profile: its own bot, its own system prompt, its own skills, sessions and memory.
+
+```bash
+hermes profile create waypoint
+```
+
+That creates `~/.hermes/profiles/waypoint/` with a `config.yaml`, `.env`,
+`skills/`, `sessions/` and `memories/` of its own. Every step below installs
+into that directory. Nothing touches your default profile.
+
+The reason it is a profile and not just another channel on the default agent:
+shop work needs its own Discord identity and its own standing instructions. Two
+roles sharing one profile means shared skills, shared memory and one bot token
+answering for both, which is where the conflicts come from. A profile makes
+Waypoint disposable and isolated — you can delete it without touching anything
+else you run.
+
+### 3. Set Up Database
 
 **Option A — Use the shipped demo database (sanitised shop data, safe to inspect):**
 ```bash
@@ -267,9 +287,10 @@ sqlite3 ~/.hermes/data/vehicle_data.db < database/schema.sql
 ```
 
 > **Privacy note:** The committed `database/seed_vehicle_data.db` is real
-> shop data with identity removed: the `customers` table is gone, `customer_id`
-> is nulled, VINs are replaced with `DEMO…` placeholders, and names, phone
-> numbers and street addresses are redacted out of every free-text column by
+> shop data with identity removed: the `customers` table ships empty,
+> `customer_id` is nulled, VINs are replaced with `DEMO…` placeholders, and
+> names, phone numbers and street addresses are redacted out of every free-text
+> column by
 > `scripts/waypoint_export_cloud.py`. That script re-scans its own output and
 > refuses to write a database that still trips a detector. The
 > `database/vehicle_data.db` filename is gitignored so your own live database
@@ -277,36 +298,52 @@ sqlite3 ~/.hermes/data/vehicle_data.db < database/schema.sql
 > location (e.g. for testing), set the `WAYPOINT_DB` environment variable:
 > `WAYPOINT_DB=/tmp/test.db python3 scripts/vehicle_db.py recent-jobs`.
 
-### 3. Install CLI Scripts
+### 4. Install the scripts into the profile
 
 ```bash
-mkdir -p ~/.hermes/scripts
-cp scripts/vehicle_db.py ~/.hermes/scripts/vehicle_db.py
-cp scripts/waypoint_job_check.py ~/.hermes/scripts/waypoint_job_check.py
-chmod +x ~/.hermes/scripts/vehicle_db.py
-chmod +x ~/.hermes/scripts/waypoint_job_check.py
+PROFILE=~/.hermes/profiles/waypoint
+mkdir -p "$PROFILE/scripts"
+cp scripts/*.py "$PROFILE/scripts/"
+chmod +x "$PROFILE/scripts/vehicle_db.py" "$PROFILE/scripts/waypoint_job_check.py"
 ```
 
-### 4. Install Hermes Skills
+### 5. Install the skills into the profile
 
 ```bash
-mkdir -p ~/.hermes/skills/waypoint
-cp -r skills/waypoint-service-jobs ~/.hermes/skills/waypoint/
-cp -r skills/waypoint-vehicle-data ~/.hermes/skills/software-development/
-cp -r skills/waypoint-hours-query ~/.hermes/skills/
+cp -r skills/waypoint-service-jobs "$PROFILE/skills/"
+cp -r skills/waypoint-vehicle-data "$PROFILE/skills/"
+cp -r skills/waypoint-hours-query "$PROFILE/skills/"
 ```
 
-### 5. Verify CLI
+### 6. Verify
 
 ```bash
-python3 ~/.hermes/scripts/vehicle_db.py recent-jobs
-python3 ~/.hermes/scripts/vehicle_db.py weekly
+python3 "$PROFILE/scripts/vehicle_db.py" recent-jobs
+python3 "$PROFILE/scripts/vehicle_db.py" weekly
+hermes --profile waypoint skills list | grep waypoint
 ```
 
 ## Discord Configuration
 
-Waypoint runs through a Hermes Agent gateway connected to Discord.
-Add this to `~/.hermes/config.yaml`:
+Waypoint runs through a Hermes Agent gateway connected to Discord, using its
+own bot token so it appears as its own bot and answers only to its own allowlist.
+Put the credentials in the **profile's** `.env`:
+
+```bash
+cat >> ~/.hermes/profiles/waypoint/.env <<'EOF'
+DISCORD_BOT_TOKEN=your_bot_token
+DISCORD_ALLOWED_USERS=your_discord_user_id
+DISCORD_HOME_CHANNEL_ID=your_channel_id
+EOF
+```
+
+The key name matters: it is `DISCORD_ALLOWED_USERS`, not `DISCORD_ALLOWED_USER_IDS`.
+With the wrong name the gateway starts with no allowlist, then denies every
+message including yours — the bot creates a thread, shows a typing indicator, and
+returns nothing. Enable **Message Content Intent** in the Discord developer portal
+too, or the bot never sees the message text.
+
+Then add this to the profile's `config.yaml` (`hermes --profile waypoint config edit`):
 
 ```yaml
 discord:
@@ -322,14 +359,18 @@ discord:
 open a thread in #waypoint, then @mention the bot. Direct channel messages
 (do not open a thread) are silently dropped by Discord.
 
-After config changes, restart the gateway:
+After config changes, restart that profile's gateway:
 ```bash
-hermes gateway restart
+hermes --profile waypoint gateway restart
 ```
+
+If you run several profiles on one machine, one gateway process can serve all of
+them; the command above only reloads the Waypoint entry.
 
 ## CLI Reference
 
-All commands: `python3 ~/.hermes/scripts/vehicle_db.py <command> [args...]`
+All commands: `python3 ~/.hermes/profiles/waypoint/scripts/vehicle_db.py <command> [args...]`
+(or `vehicle_db.py` directly once that directory is on your `PATH`).
 
 **Note:** `--help` does not work. Positional commands only.
 
@@ -436,10 +477,10 @@ no LLM, zero token cost). It posts briefings to Discord.
 
 **Setup with Hermes cron:**
 ```bash
-hermes cron create \
+hermes --profile waypoint cron create \
   --name "waypoint-job-check-weekday" \
   --schedule "0 8-17 * * 1-5" \
-  --script ~/.hermes/scripts/waypoint_job_check.py \
+  --script ~/.hermes/profiles/waypoint/scripts/waypoint_job_check.py \
   --no-agent \
   --deliver "discord:#labs-lounge"
 ```
