@@ -493,6 +493,16 @@ open -> active -> complete
 
 ## CarUs Integration
 
+CarUs is a personal vehicle maintenance AI assistant. It will integrate with
+Waypoint and Shop Rewards systems and data to automate vehicle maintenance on a
+client's (customer's) personal vehicle. This is still in development and very
+much a concept at the moment.
+
+The idea is that a customer can talk with their car on a personal or social
+level. If there are concerns or issues, then an appointment can be easily made,
+returning to a technician and shop they trust. The shop and tech will know the
+vehicle and incoming work.
+
 Waypoint's SQLite data maps to CarUs (Rogue Media Lab's vehicle relationship
 web app) models:
 
