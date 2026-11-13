@@ -28,3 +28,9 @@ database/vehicle_data.db
 *.bak-pre-*
 *.db.bak*
 
+# Working notes, mockups and plans. These hold product strategy — pricing,
+# margins, competitor analysis — and this repository is public. They stay local
+# on purpose: add them to the repo only by deliberate decision, not by accident.
+docs/
+plans/
+
