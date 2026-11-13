@@ -42,8 +42,20 @@ CREATE TABLE job_parts (
         unit_cost REAL,
         supplier TEXT,
         notes TEXT,
+        deleted_at TEXT,
         created_at TEXT DEFAULT (datetime('now')),
         FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
+    );
+CREATE TABLE deletions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entity TEXT NOT NULL,
+        row_id INTEGER NOT NULL,
+        job_id INTEGER,
+        snapshot TEXT NOT NULL,
+        reason TEXT,
+        actor TEXT,
+        restored_at TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
     );
 CREATE TABLE procedures (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

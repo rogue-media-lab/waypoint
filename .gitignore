@@ -18,3 +18,13 @@ database/vehicle_data.db
 
 # Local photo / image cache paths never belong in the repo
 *.local-photos
+
+# Python test/venv artifacts
+.venv/
+.pytest_cache/
+
+# Local backups taken before a data repair or migration — never commit these.
+# The convention is <file>.bak-pre-<reason>-<timestamp>.
+*.bak-pre-*
+*.db.bak*
+

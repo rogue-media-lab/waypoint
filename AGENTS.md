@@ -12,6 +12,29 @@ and a cron watchdog that posts to Discord. Designed for hands-free, instant
 You talk to it by invoking `python3 scripts/vehicle_db.py <command>` and
 parse JSON. There is no REST API, no RPC layer, no SDK — the CLI is the API.
 
+## THE RULE THAT HAS ALREADY COST US A RECORD
+
+**Never pass a bare integer as a job reference.**
+
+`jobs.id` and `jobs.job_number` are two DIFFERENT sequences that overlap:
+database **id 258** is **job_number 256**. Both are integers. The reports
+(`weekly`, `recent-jobs`, `job-details`) print `job_number` as the `job` field,
+while the write commands take an id — so a bare number read off a report is
+ambiguous by construction.
+
+On 2026-11-11 a bare `258` was silently resolved as an id, and a part row plus a
+repair note landed on **another car's closed repair order**.
+
+| Say this | Means |
+|---|---|
+| `#258` | **job_number** 258 — what `weekly` / `recent-jobs` print as `job` |
+| `id:258` | **database id** 258 — the primary key |
+| `258` | accepted **only** when both readings are the same row; otherwise refused |
+
+The CLI enforces this. A bare integer that could be two different jobs returns
+an error naming *both* jobs. **If you see that error, do not work around it** —
+pick the form you actually meant. Never fall back to raw SQL to dodge it.
+
 ## Five things to know
 
 1. **The CLI is positional, not flag-based.** `vehicle_db.py recent-jobs` works.
@@ -79,8 +102,8 @@ placeholders, and names/phones/addresses redacted from free text.
 | `decode-vin` | `<VIN>` | NHTSA decode JSON |
 | `find-or-create` | `<VIN\|NULL> <year> <make> <model> [trim]` | `{vehicle_id, status}` |
 | `job` | `<vehicle_id> "<description>"` | `{job_id, vehicle_id, description}` |
-| `complete` | `<job_id> <minutes>` | closes job, sets `end_date` |
-| `job-details` | `<job_id>` | full JSON (vehicle, parts, procedures) |
+| `complete` | `<job_ref> <minutes>` | closes job, sets `end_date` |
+| `job-details` | `<job_ref>` | full JSON (vehicle, parts, procedures) |
 | `active-jobs` | — | list of open/active jobs |
 | `recent-jobs` | — | last 10 jobs |
 | `labor-lookup` | `"<service>" [make] [model] [year]` | matching labor times |
@@ -88,11 +111,33 @@ placeholders, and names/phones/addresses redacted from free text.
 | `labor-list` | `[make] [model] [year]` | all labor times (filtered) |
 | `stats` | — | `{active_jobs, time_entries, total_minutes, total_hours}` |
 | `weekly` | — | Mon–Sat work-week summary with goal tracking |
-| `part` | `<job_id> "<part_name>" [part_number] [oem] [qty] [cost] [supplier]` | adds part to job |
-| `procedure` | `<job_id> "<description>"` | adds procedure step |
+| `part` | `<job_ref> "<part_name>" [part_number] [oem] [qty] [cost] [supplier]` | adds part to job |
+| `procedure` | `<job_ref> "<description>"` | adds procedure step |
 | `inventory` | `"<part_name>"` [part_number] [oem] [qty] [reorder_level] [shelf_location] | stock item |
 | `low-stock` | — | items at/below reorder level |
+| `delete` | `part <part_id> --reason "why" [--dry-run]` | **soft** delete; returns `deletion_id` |
+| `undelete` | `<deletion_id>` | restores a soft-deleted row |
+| `deletions` | `[limit]` | the soft-delete audit trail |
 | `init` | — | creates schema (idempotent) |
+
+`<job_ref>` is `#258` (job number) or `id:258` (database id) — see the rule above.
+A bare integer is accepted only when both readings are the same row.
+
+### Deleting, and why it is guarded
+
+`delete part` **soft** deletes only: the row is timestamped (`job_parts.deleted_at`)
+and its full snapshot is written to the `deletions` table first, so `undelete`
+reverses it. There is deliberately **no physical-delete flag** — a guardrail you
+can switch off is not a guardrail.
+
+- **A reason is required.** It is what forces the caller to state intent before
+  writing, and what makes the audit trail readable a month later.
+- **`--dry-run`** shows exactly what would go and changes nothing.
+- **Deleting a job is refused outright.** The schema cascades `ON DELETE` from
+  `jobs` to `job_parts` and `procedures`, so one job delete silently destroys
+  every part and step recorded against it.
+- **Reads must filter `deleted_at IS NULL`.** A soft delete that nothing filters
+  is a flag nobody reads. `job_details` does; check any new query you write.
 
 Every command returns JSON on stdout. Errors return `{"error": "..."}`.
 
@@ -140,6 +185,19 @@ The voice-friendly UX (headset on, hands greasy) assumes:
 ## Pitfalls (agent-specific)
 
 These aren't in the README because humans don't hit them:
+
+- **A bare integer is not a job reference.** `id` and `job_number` overlap
+  (id 258 = job_number 256), and the reports print `job_number`. On 2026-11-11
+  that combination wrote a part and a note onto the wrong car's closed repair
+  order. The CLI now refuses an ambiguous bare integer — read the error, pick
+  `#258` or `id:258`, and **never reach for raw SQL to get around it.** If the
+  guard fires, it is doing exactly the job it exists for.
+- **A soft delete is only real if reads filter it.** `job_parts.deleted_at` is
+  meaningless unless every query carries `AND deleted_at IS NULL`. Adding the
+  column without the filter produces a "deleted" row that still shows everywhere.
+- **`delete` requires `--reason` and has no physical-delete flag.** That is the
+  design, not an omission. Recovering from a mistake matters more than removing
+  a row permanently.
 
 - **`init` is non-destructive.** Safe to call multiple times. Uses
   `CREATE TABLE IF NOT EXISTS` everywhere.

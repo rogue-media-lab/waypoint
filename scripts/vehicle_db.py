@@ -136,8 +136,25 @@ def init_db():
         unit_cost REAL,
         supplier TEXT,
         notes TEXT,
+        -- Soft delete: a removed row is timestamped, never destroyed, so a
+        -- mistake stays recoverable. Reads must filter `deleted_at IS NULL`.
+        deleted_at TEXT,
         created_at TEXT DEFAULT (datetime('now', 'localtime')),
         FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
+    );
+
+    -- Audit trail for every soft delete. The snapshot column holds the whole
+    -- row as JSON so `undelete` can restore it without a physical backup.
+    CREATE TABLE IF NOT EXISTS deletions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entity TEXT NOT NULL,
+        row_id INTEGER NOT NULL,
+        job_id INTEGER,
+        snapshot TEXT NOT NULL,
+        reason TEXT,
+        actor TEXT,
+        restored_at TEXT,
+        created_at TEXT DEFAULT (datetime('now', 'localtime'))
     );
 
     -- Step-by-step procedure documentation
@@ -1351,6 +1368,11 @@ def recent_jobs(limit=10):
     return jobs
 
 def job_details(job_id):
+    # Self-heal before reading: the soft-delete column and the `deletions` table
+    # arrived after most databases were created, and the read below filters on
+    # the column. Without this, `job-details` raises OperationalError on the
+    # shipped seed DB and on any install older than this change.
+    ensure_soft_delete_schema()
     conn = get_connection()
     c = conn.cursor()
     c.execute("SELECT * FROM jobs WHERE id=?", (job_id,))
@@ -1360,7 +1382,9 @@ def job_details(job_id):
         return None
     c.execute("SELECT * FROM vehicles WHERE id=?", (job["vehicle_id"],))
     vehicle = c.fetchone()
-    c.execute("SELECT * FROM job_parts WHERE job_id=?", (job_id,))
+    # Soft-deleted parts are excluded here. A soft delete that nothing filters is
+    # not a delete — it is a flag nobody reads.
+    c.execute("SELECT * FROM job_parts WHERE job_id=? AND deleted_at IS NULL", (job_id,))
     parts = c.fetchall()
     c.execute("SELECT * FROM procedures WHERE job_id=? ORDER BY step_number", (job_id,))
     steps = c.fetchall()
@@ -2742,6 +2766,211 @@ def fill_spec_fields(year, make, model, engine_size=None, fields=None,
 
 
 
+# ---------------------------------------------------------------------------
+# Safe job references — never guess which identifier was meant
+# ---------------------------------------------------------------------------
+# jobs.id and jobs.job_number are two DIFFERENT sequences that overlap: database
+# id 258 is job_number 256. Both are integers. The reports print `job_number`
+# as "job", while every write command takes an id — so a bare integer read off a
+# report is ambiguous by construction. On 2026-11-11 a bare `258` was silently
+# resolved as an id and a part row plus a repair note landed on another car's
+# closed repair order.
+#
+# Accepted forms:
+#   #258    -> job_number 258   (what `weekly` / `recent-jobs` print as "job")
+#   id:258  -> database id 258
+#   258     -> accepted ONLY when both readings resolve to the same row
+def resolve_job_ref(ref):
+    """Resolve a job reference without guessing. Returns (row, error)."""
+    raw = str(ref).strip()
+    conn = get_connection()
+    try:
+        num = oid = None
+
+        if raw.lower().startswith("id:"):
+            oid = raw[3:].strip()
+            if not oid.isdigit():
+                return None, "'id:%s' needs an integer" % oid
+        elif raw.startswith("#"):
+            num = raw[1:].strip()
+            if not num:
+                return None, "'#' needs a job number, e.g. #258"
+        elif raw.isdigit():
+            num = oid = raw          # ambiguous until proved otherwise
+        else:
+            return None, ("'%s' is not a job reference. Use #<job_number> "
+                          "(what the reports print) or id:<integer>." % raw)
+
+        def lookup(where, val):
+            r = conn.execute("SELECT id FROM jobs WHERE %s=?" % where, (val,)).fetchone()
+            return r["id"] if r else None
+
+        by_num = lookup("job_number", num) if num is not None else None
+        by_id  = lookup("id", int(oid)) if oid is not None else None
+
+        if num is not None and oid is not None:
+            if by_num is None and by_id is None:
+                return None, "no job matches %s, as an id or as a job number" % raw
+            if by_num is not None and by_id is not None and by_num != by_id:
+                other = conn.execute("SELECT job_number FROM jobs WHERE id=?",
+                                     (by_id,)).fetchone()
+                return None, (
+                    "AMBIGUOUS REFERENCE '%s': as a job number it is #%s (database id %s), "
+                    "but as a database id it is job #%s (id %s). "
+                    "Say '#%s' for job number %s, or 'id:%s' for the other."
+                    % (raw, raw, by_num,
+                       other["job_number"] if other else "?", by_id,
+                       raw, raw, raw))
+            target = by_num if by_num is not None else by_id
+        elif num is not None:
+            if by_num is None:
+                return None, "no job with job_number %s" % num
+            target = by_num
+        else:
+            if by_id is None:
+                return None, "no job with id %s" % oid
+            target = by_id
+
+        return conn.execute("SELECT * FROM jobs WHERE id=?", (target,)).fetchone(), None
+    finally:
+        conn.close()
+
+
+# Commands whose second argument is a JOB reference. Resolving them in ONE place
+# means no branch can take a bare integer at face value.
+JOB_REF_COMMANDS = {
+    "part", "part-add", "procedure", "complete", "book",
+    "job-details", "payment-set", "note", "clock",
+}
+
+
+def ensure_soft_delete_schema():
+    """
+    Make an existing database support soft delete.
+
+    `init_db` uses CREATE TABLE IF NOT EXISTS, so a database created before this
+    column existed does not gain it from a re-init — add it here instead, on
+    demand and idempotently. Fresh databases get it from the CREATE TABLE.
+    """
+    conn = get_connection()
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS deletions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entity TEXT NOT NULL,
+                row_id INTEGER NOT NULL,
+                job_id INTEGER,
+                snapshot TEXT NOT NULL,
+                reason TEXT,
+                actor TEXT,
+                restored_at TEXT,
+                created_at TEXT DEFAULT (datetime('now', 'localtime'))
+            )""")
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(job_parts)").fetchall()}
+        # `cols` is empty on a database that has not run init_db yet — ALTERing a
+        # table that does not exist raises, which would break `init` itself.
+        if cols and "deleted_at" not in cols:
+            conn.execute("ALTER TABLE job_parts ADD COLUMN deleted_at TEXT")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def soft_delete_job_part(part_id, reason, actor=None, dry_run=False):
+    """
+    Remove a part row from a job — recoverably.
+
+    The row is timestamped, never destroyed, and the whole row is written to
+    `deletions` first so `undelete` can put it back. A physical DELETE is
+    deliberately not offered: something that can freely destroy rows in the shop
+    database can lose a repair record with no way back, which is the opposite of
+    the problem this whole change exists to solve.
+
+    A reason is required. It is not bureaucracy — it is what makes an agent
+    state its intent before writing, and what makes the audit trail readable a
+    month later.
+    """
+    if not reason or not str(reason).strip():
+        return None, "a reason is required — say why the row is being removed"
+
+    conn = get_connection()
+    try:
+        row = conn.execute("SELECT * FROM job_parts WHERE id=?", (part_id,)).fetchone()
+        if row is None:
+            return None, "no job_parts row with id %s" % part_id
+        if row["deleted_at"]:
+            return None, "part %s is already deleted (at %s)" % (part_id, row["deleted_at"])
+
+        job = conn.execute("SELECT job_number, description FROM jobs WHERE id=?",
+                           (row["job_id"],)).fetchone()
+        belongs_to = dict(job) if job else None
+
+        if dry_run:
+            return {
+                "dry_run": True,
+                "would_delete": {"entity": "job_parts", "row_id": part_id,
+                                 "job_id": row["job_id"],
+                                 "part_name": row["part_name"],
+                                 "part_number": row["part_number"]},
+                "belongs_to": belongs_to,
+                "reason": reason,
+                "note": "Nothing changed. Re-run without --dry-run to apply.",
+            }, None
+
+        cur = conn.execute(
+            "INSERT INTO deletions (entity, row_id, job_id, snapshot, reason, actor) "
+            "VALUES (?,?,?,?,?,?)",
+            ("job_parts", part_id, row["job_id"], json.dumps(dict(row)), reason, actor))
+        deletion_id = cur.lastrowid
+        conn.execute(
+            "UPDATE job_parts SET deleted_at=datetime('now','localtime') WHERE id=?",
+            (part_id,))
+        conn.commit()
+        return {
+            "deleted": {"entity": "job_parts", "row_id": part_id,
+                        "job_id": row["job_id"], "part_name": row["part_name"],
+                        "part_number": row["part_number"]},
+            "belongs_to": belongs_to,
+            "deletion_id": deletion_id,
+            "reason": reason,
+            "restore_with": "vehicle_db.py undelete %s" % deletion_id,
+        }, None
+    finally:
+        conn.close()
+
+
+def undelete(deletion_id):
+    """Restore a soft-deleted row from its audit snapshot."""
+    conn = get_connection()
+    try:
+        d = conn.execute("SELECT * FROM deletions WHERE id=?", (deletion_id,)).fetchone()
+        if d is None:
+            return None, "no deletion with id %s" % deletion_id
+        if d["restored_at"]:
+            return None, "deletion %s was already restored at %s" % (deletion_id, d["restored_at"])
+        if d["entity"] != "job_parts":
+            return None, "entity '%s' cannot be restored yet" % d["entity"]
+
+        row = conn.execute("SELECT * FROM job_parts WHERE id=?", (d["row_id"],)).fetchone()
+        if row is None:
+            return None, ("deletion %s records row %s, but that row is gone — "
+                          "it was physically removed after the soft delete"
+                          % (deletion_id, d["row_id"]))
+
+        conn.execute("UPDATE job_parts SET deleted_at=NULL WHERE id=?", (d["row_id"],))
+        conn.execute("UPDATE deletions SET restored_at=datetime('now','localtime') WHERE id=?",
+                     (deletion_id,))
+        conn.commit()
+        return {
+            "restored": {"entity": "job_parts", "row_id": d["row_id"],
+                         "job_id": row["job_id"], "part_name": row["part_name"],
+                         "part_number": row["part_number"]},
+            "deletion_id": deletion_id,
+        }, None
+    finally:
+        conn.close()
+
+
 def main():
     import json
     if len(sys.argv) < 2:
@@ -2749,6 +2978,20 @@ def main():
         sys.exit(1)
 
     command = sys.argv[1]
+
+    # Resolve job references ONCE, here, before any branch can act on a bare
+    # integer. sys.argv[2] is rewritten to the canonical database id, so every
+    # existing `int(sys.argv[2])` below keeps working unchanged — and a bare
+    # integer that could mean two different jobs is refused before any write.
+    if command in JOB_REF_COMMANDS and len(sys.argv) > 2:
+        _job_row, _job_err = resolve_job_ref(sys.argv[2])
+        if _job_err:
+            print(json.dumps({"error": _job_err}))
+            sys.exit(1)
+        if _job_row is None:
+            print(json.dumps({"error": "could not resolve job reference '%s'" % sys.argv[2]}))
+            sys.exit(1)
+        sys.argv[2] = str(_job_row["id"])
 
     if command == "init":
         print(json.dumps({"result": init_db()}))
@@ -3320,6 +3563,73 @@ def main():
         hours = float(sys.argv[4])
         update_labor_time(labor_id, service=service, hours=hours)
         print(json.dumps({"updated": labor_id, "service": service, "hours": hours}))
+
+    elif command == "delete":
+        # delete part <part_id> --reason "..." [--dry-run]
+        #
+        # Soft delete ONLY. There is deliberately no physical-delete flag: a
+        # guardrail that can be turned off with a flag is not a guardrail. The
+        # row is timestamped and its snapshot recorded, so `undelete` reverses it.
+        args = sys.argv[2:]
+        if not args:
+            print(json.dumps({"error": "Usage: vehicle_db.py delete part <part_id> "
+                                       "--reason \"why\" [--dry-run]"}))
+            sys.exit(1)
+        entity = args[0]
+        rest = args[1:]
+        dry_run = "--dry-run" in rest
+        rest = [a for a in rest if a != "--dry-run"]
+        reason = None
+        if "--reason" in rest:
+            _i = rest.index("--reason")
+            reason = " ".join(rest[_i + 1:]).strip() or None
+            rest = rest[:_i]
+
+        if entity != "part":
+            print(json.dumps({"error":
+                "only 'delete part' is supported (got '%s'). Deleting a JOB is refused "
+                "outright: the schema cascades ON DELETE from jobs to job_parts and "
+                "procedures, so one job delete silently destroys every part and step "
+                "recorded against it." % entity}))
+            sys.exit(1)
+        if not rest or not rest[0].isdigit():
+            print(json.dumps({"error":
+                "delete part needs a numeric job_parts id (not a job reference). "
+                "Use job-details to list a job's part ids first."}))
+            sys.exit(1)
+
+        ensure_soft_delete_schema()
+        out, err = soft_delete_job_part(int(rest[0]), reason, actor="cli", dry_run=dry_run)
+        if err:
+            print(json.dumps({"error": err}))
+            sys.exit(1)
+        print(json.dumps(out, indent=2))
+
+    elif command == "undelete":
+        # undelete <deletion_id>  — restore a soft-deleted row
+        if len(sys.argv) < 3:
+            print(json.dumps({"error": "Usage: vehicle_db.py undelete <deletion_id>"}))
+            sys.exit(1)
+        ensure_soft_delete_schema()
+        out, err = undelete(int(sys.argv[2]))
+        if err:
+            print(json.dumps({"error": err}))
+            sys.exit(1)
+        print(json.dumps(out, indent=2))
+
+    elif command == "deletions":
+        # deletions [limit] — the audit trail of soft deletes
+        ensure_soft_delete_schema()
+        limit = int(sys.argv[2]) if len(sys.argv) > 2 else 20
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT id, entity, row_id, job_id, reason, actor, "
+                "       created_at, restored_at FROM deletions "
+                "ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        finally:
+            conn.close()
+        print(json.dumps([dict(r) for r in rows], indent=2))
 
     elif command == "labor-delete":
         # labor-delete <id> [id ...]
