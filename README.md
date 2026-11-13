@@ -289,6 +289,22 @@ else you run.
 
 ### 3. Set Up Database
 
+First, tell the scripts where the database lives — **they will not guess**. Either
+create the path config:
+
+```bash
+mkdir -p ~/.hermes/data
+cp config/waypoint_paths.example.yaml ~/.hermes/data/waypoint_paths.yaml
+# edit paths.vehicle_database in it if you want the DB somewhere else
+```
+
+…or skip the config entirely and pass `WAYPOINT_DB=<path>` on every invocation.
+`WAYPOINT_DB` beats the config when both are present. With neither, the scripts
+exit with a message naming both options rather than falling back to a hardcoded
+path — that fallback was a bug, and it is gone on purpose.
+
+**Then pick a database:**
+
 **Option A — Use the shipped demo database (sanitised shop data, safe to inspect):**
 ```bash
 mkdir -p ~/.hermes/data
@@ -300,6 +316,10 @@ cp database/seed_vehicle_data.db ~/.hermes/data/vehicle_data.db
 mkdir -p ~/.hermes/data
 sqlite3 ~/.hermes/data/vehicle_data.db < database/schema.sql
 ```
+
+Both of those assume the config from above points at
+`~/.hermes/data/vehicle_data.db`, which the example does by default. If you set
+`WAYPOINT_DB` instead, write the file to whatever path that variable names.
 
 > **Privacy note:** The committed `database/seed_vehicle_data.db` is real
 > shop data with identity removed: the `customers` table ships empty,
