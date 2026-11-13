@@ -128,10 +128,12 @@ def test_init_is_idempotent(module, blank_db):
     first = tables()
     module.init_db()
     module.init_db()
-    # init_db creates the core schema only; the specs/diagnostics tables are
-    # added by the ensure_* migration helpers on first use (18 here, 29 in a
-    # fully-migrated database like the shipped seed). `deletions` is part of the
-    # core schema since the soft-delete change, which is why this is 18 and not 17.
+    # init_db creates the core schema only; the specs/diagnostics tables arrive
+    # from the ensure_* migration helpers on first use. This counts every row in
+    # sqlite_master of type='table', so it includes sqlite_sequence and reads one
+    # higher than the count `init` itself reports (18 here vs 17 reported, 29 vs
+    # 28 in a fully-migrated database like the shipped seed). `deletions` is part
+    # of the core schema since the soft-delete change, which is why this is 18.
     assert tables() == first == 18
 
 

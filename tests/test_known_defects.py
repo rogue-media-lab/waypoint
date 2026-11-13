@@ -19,12 +19,14 @@ REPO = Path(__file__).resolve().parents[1]
 SCRIPTS = REPO / "scripts"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="DB_PATH comes from waypoint_paths.yaml; WAYPOINT_DB is never read, "
-    "though README and AGENTS.md both document it as the sandbox override",
-)
 def test_waypoint_db_env_var_is_honored(tmp_path):
+    """`WAYPOINT_DB` overrides the database path.
+
+    This was an xfail: the variable was documented in README and AGENTS.md but
+    never read, so the repo's own quickstart command silently targeted whatever
+    `waypoint_paths.yaml` said. It is implemented now, which is why this is a
+    real test rather than a recorded defect.
+    """
     target = tmp_path / "sandbox.db"
     env = {
         **os.environ,

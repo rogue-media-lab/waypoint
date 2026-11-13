@@ -29,11 +29,26 @@ def _load_paths_config():
     """Load path config from WAYPOINT_PATHS_CONFIG (or default). Returns dict of paths
     as pathlib.Path objects (already ~-expanded).
 
-    Raises FileNotFoundError if config is missing — caller decides whether to fail
-    loudly or fall back. We deliberately fail loud: silent fallback to a hardcoded
-    path was the bug this refactor was meant to prevent.
+    `WAYPOINT_DB` overrides `paths.vehicle_database`, and works with NO config file
+    at all — a fresh clone has no waypoint_paths.yaml, and the install instructions
+    tell people to set that variable, so it has to be enough on its own.
+
+    Raises FileNotFoundError if there is neither a config nor WAYPOINT_DB — caller
+    decides whether to fail loudly or fall back. We deliberately fail loud: silent
+    fallback to a hardcoded path was the bug this refactor was meant to prevent.
     """
+    env_db = os.environ.get("WAYPOINT_DB")
     config_path = Path(os.environ.get(_CONFIG_ENV, _DEFAULT_CONFIG)).expanduser()
+
+    if not config_path.exists():
+        if env_db:
+            return {"vehicle_database": Path(os.path.expanduser(env_db))}
+        raise FileNotFoundError(
+            f"No path config at {config_path}, and WAYPOINT_DB is not set. "
+            f"Either copy config/waypoint_paths.example.yaml to {config_path} "
+            f"and edit it, or set WAYPOINT_DB=/path/to/vehicle_data.db"
+        )
+
     if yaml is None:
         raise RuntimeError(
             f"PyYAML required to read {config_path}. `pip install pyyaml`."
@@ -47,7 +62,12 @@ def _load_paths_config():
             f"in scripts/vehicle_db.py or bump the config's version field."
         )
     # YAML does not expand ~ — do it here so callers get ready-to-use Path objects.
-    return {k: Path(os.path.expanduser(v)) for k, v in cfg["paths"].items()}
+    paths = {k: Path(os.path.expanduser(v)) for k, v in cfg["paths"].items()}
+    if env_db:
+        # Explicit environment override beats the config file, so a caller can
+        # sandbox the whole script without editing a shared config.
+        paths["vehicle_database"] = Path(os.path.expanduser(env_db))
+    return paths
 
 
 _paths = _load_paths_config()

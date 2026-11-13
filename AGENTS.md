@@ -41,10 +41,15 @@ pick the form you actually meant. Never fall back to raw SQL to dodge it.
    `vehicle_db.py --help` does NOT (it returns "Unknown command: --help").
    See [CLI Reference](#cli-reference) below.
 
-2. **Default DB lives at `~/.hermes/data/vehicle_data.db`.** Set the
-   `WAYPOINT_DB` environment variable to point elsewhere — useful for
+2. **The DB path comes from a path config, and `WAYPOINT_DB` overrides it.**
+   The config is `~/.hermes/data/waypoint_paths.yaml` → `paths.vehicle_database`
+   (start from `config/waypoint_paths.example.yaml`). Setting `WAYPOINT_DB`
+   overrides that key **and works with no config file at all** — useful for
    testing, demos, or running multiple agents in parallel.
    `WAYPOINT_DB=/tmp/test.db python3 scripts/vehicle_db.py recent-jobs`.
+   `WAYPOINT_PATHS_CONFIG=<path>` points at a different config file.
+   With neither a config nor `WAYPOINT_DB`, the loader fails loudly on purpose —
+   a silent hardcoded fallback was the bug this replaced.
 
 3. **`complete` takes minutes, not hours.** `complete 12 60` means job 12,
    60 minutes. Passing `1.0` for one hour records one minute — silent bug
@@ -78,22 +83,48 @@ waypoint/
 
 ## Installation (portable)
 
-```bash
-# 1. Pick where the DB lives. Default is ~/.hermes/data/ — override if you want.
-export WAYPOINT_DB=/path/to/your/vehicle_data.db
+Two ways to point the scripts at a database. Pick one.
 
-# 2. Initialize a fresh DB (or copy the seed for a demo).
+**Option A — the example config (recommended for a real install):**
+
+```bash
+mkdir -p ~/.hermes/data
+cp config/waypoint_paths.example.yaml ~/.hermes/data/waypoint_paths.yaml
+$EDITOR ~/.hermes/data/waypoint_paths.yaml     # set paths.vehicle_database
+
+python3 scripts/vehicle_db.py init             # creates the schema
+python3 scripts/vehicle_db.py recent-jobs      # verify
+```
+
+**Option B — one environment variable (no config file needed):**
+
+```bash
+export WAYPOINT_DB=/path/to/your/vehicle_data.db
 mkdir -p "$(dirname "$WAYPOINT_DB")"
 python3 scripts/vehicle_db.py init
-
-# 3. Verify it works.
 python3 scripts/vehicle_db.py recent-jobs
 ```
 
-For demos / sandboxing, copy `database/seed_vehicle_data.db` to your
-`WAYPOINT_DB` location and skip step 2. The seed has 0 customer PII — it is
-real shop data with the customer table dropped, VINs replaced by `DEMO…`
-placeholders, and names/phones/addresses redacted from free text.
+`WAYPOINT_DB` overrides the config's `vehicle_database` when both are present, so
+Option B also works as a sandbox against an existing install.
+
+**For a demo, skip `init` and copy the seed instead** — the seed already has the
+schema:
+
+```bash
+cp database/seed_vehicle_data.db "$WAYPOINT_DB"     # Option B
+# or point paths.vehicle_database at database/seed_vehicle_data.db for Option A
+```
+
+The seed has 0 customer PII: real shop data with the customer table dropped, VINs
+replaced by `DEMO…` placeholders, and names/phones/addresses redacted from free
+text.
+
+**Precedence, and the loud failure.** `WAYPOINT_DB` beats
+`paths.vehicle_database`, which beats nothing — if you set neither, the script
+exits with a message telling you exactly that, rather than silently creating a
+database somewhere you did not expect. That is deliberate: an earlier version
+fell back to a hardcoded path and quietly wrote to the wrong file.
 
 ## CLI Reference (condensed)
 

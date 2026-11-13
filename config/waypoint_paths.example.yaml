@@ -1,0 +1,50 @@
+# Waypoint path configuration — EXAMPLE
+#
+# Copy this file to ~/.hermes/data/waypoint_paths.yaml and edit the paths below.
+#
+#   mkdir -p ~/.hermes/data
+#   cp config/waypoint_paths.example.yaml ~/.hermes/data/waypoint_paths.yaml
+#   $EDITOR ~/.hermes/data/waypoint_paths.yaml
+#
+# You do NOT need this file if you set WAYPOINT_DB — see "Overrides" below.
+#
+# Scripts MUST read paths from this file and never hardcode one. The loader
+# fails loudly when there is neither a config nor WAYPOINT_DB, because a silent
+# fallback to a hardcoded path was the exact bug this file was introduced to fix.
+
+paths:
+  # SQLite database — the single source of truth for shop-floor data.
+  # This is the only key scripts/vehicle_db.py reads today; the rest are
+  # recorded for other scripts and for humans.
+  vehicle_database: ~/.hermes/data/vehicle_data.db
+
+  # Waypoint-owned scripts (vehicle_db.py, waypoint_*.py).
+  scripts_directory: ~/.hermes/profiles/waypoint/scripts
+
+  # Waypoint profile root.
+  profile_root: ~/.hermes/profiles/waypoint
+
+  # Hermes data root (parent of the database).
+  hermes_data_root: ~/.hermes/data
+
+  # Skill body locations (informational — skills are loaded by the gateway).
+  skills_root: ~/.hermes/profiles/waypoint/skills
+
+# ---------------------------------------------------------------------------
+# Overrides
+# ---------------------------------------------------------------------------
+# WAYPOINT_DB=<path>
+#     Point the vehicle database somewhere else. Beats `vehicle_database` above,
+#     and works with no config file at all — this is enough on its own:
+#
+#         WAYPOINT_DB=/tmp/sandbox.db python3 scripts/vehicle_db.py init
+#
+# WAYPOINT_PATHS_CONFIG=<path>
+#     Use a different path config file instead of ~/.hermes/data/waypoint_paths.yaml.
+#
+# There is no WAYPOINT_<KEY>_PATH convention. An earlier version of this header
+# claimed one; it was never implemented, and nothing read it. Use WAYPOINT_DB.
+
+# Schema version — bump when path keys change. Scripts refuse to load a config
+# whose version does not match _CONFIG_SCHEMA_VERSION in scripts/vehicle_db.py.
+version: 1
