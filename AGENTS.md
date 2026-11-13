@@ -133,7 +133,7 @@ fell back to a hardcoded path and quietly wrote to the wrong file.
 | `decode-vin` | `<VIN>` | NHTSA decode JSON |
 | `find-or-create` | `<VIN\|NULL> <year> <make> <model> [trim]` | `{vehicle_id, status}` |
 | `job` | `<vehicle_id> "<description>"` | `{job_id, vehicle_id, description}` |
-| `complete` | `<job_ref> <minutes>` | closes job, sets `end_date` |
+| `complete` | `<job_ref> <minutes> [--correct --reason "why"]` | closes job, sets `end_date`; billed time immutable once closed |
 | `job-details` | `<job_ref>` | full JSON (vehicle, parts, procedures) |
 | `active-jobs` | — | list of open/active jobs |
 | `recent-jobs` | — | last 10 jobs |
@@ -233,8 +233,13 @@ These aren't in the README because humans don't hit them:
 - **`init` is non-destructive.** Safe to call multiple times. Uses
   `CREATE TABLE IF NOT EXISTS` everywhere.
 
-- **`complete` on a closed job is guarded.** Returns a warning and
-  preserves the original `end_date` — won't double-bill a job.
+- **`complete` on a closed job does not move billed time.** Billed values
+  (`time_in_minutes`, both cost totals) are immutable once a job is closed —
+  they feed pay and the weekly report, and a second call used to overwrite them
+  through COALESCE. A refused call returns an error naming the recorded value.
+  **A deliberate correction needs `--correct --reason "why"`** and is written to
+  the `deletions` audit table as `job_billed_correction`. Re-running `complete`
+  with the *same* value is a no-op, not an error — idempotence still holds.
 
 - **`find-or-create` with NULL VIN** dedups on year/make/model as
   fallback. Two 2019 GMC Sierras with NULL VINs collapse into one record.

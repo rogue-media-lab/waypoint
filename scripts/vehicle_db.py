@@ -1229,12 +1229,23 @@ def ensure_booked_column():
     conn.close()
 
 
-def complete_job(job_id, total_parts_cost=None, total_labor_cost=None, time_in_minutes=None):
+def complete_job(job_id, total_parts_cost=None, total_labor_cost=None,
+                 time_in_minutes=None, correct=False, reason=None):
+    """Close a job. Returns 0 not-found, 1 completed, 2 already complete,
+    3 refused because the call would change a closed job's billed values.
+
+    Billed values — `time_in_minutes` and the two cost totals — are immutable
+    once a job is closed. They used to be overwritten with COALESCE on a second
+    call, which silently moved recorded hours and therefore pay and the weekly
+    report. A correction is still possible, but it has to be asked for
+    (`correct=True`) and it is written to the audit trail.
+    """
     ensure_booked_column()
     conn = get_connection()
     c = conn.cursor()
     # Check current status before updating end_date
-    c.execute("SELECT status, end_date, time_in_minutes, booked_minutes FROM jobs WHERE id=?", (job_id,))
+    c.execute("SELECT status, end_date, time_in_minutes, booked_minutes, "
+              "total_parts_cost, total_labor_cost FROM jobs WHERE id=?", (job_id,))
     row = c.fetchone()
     if not row:
         conn.close()
@@ -1248,7 +1259,33 @@ def complete_job(job_id, total_parts_cost=None, total_labor_cost=None, time_in_m
     if booked is None and prev_minutes and current_status != 'complete':
         booked = prev_minutes
     if current_status == 'complete':
-        # Preserve original end_date; only update time/cost if provided
+        # A closed job's billed values do not move on their own.
+        proposed = {
+            "time_in_minutes":   time_in_minutes,
+            "total_parts_cost":  total_parts_cost,
+            "total_labor_cost":  total_labor_cost,
+        }
+        current = {
+            "time_in_minutes":   row[2],
+            "total_parts_cost":  row[4],
+            "total_labor_cost":  row[5],
+        }
+        changing = {k: (current[k], v) for k, v in proposed.items()
+                    if v is not None and v != current[k]}
+
+        if changing and not correct:
+            conn.close()
+            return 3  # refused: this would rewrite billed values on a closed job
+        if changing:
+            # Deliberate correction. Recorded, so the change is attributable.
+            ensure_soft_delete_schema()
+            conn.execute(
+                "INSERT INTO deletions (entity, row_id, job_id, snapshot, reason, actor) "
+                "VALUES (?,?,?,?,?,?)",
+                ("job_billed_correction", job_id, job_id,
+                 json.dumps({"before": {k: current[k] for k in changing},
+                             "after": {k: changing[k][1] for k in changing}}),
+                 reason or "unspecified correction", "cli"))
         c.execute("""UPDATE jobs SET
                     time_in_minutes=COALESCE(?, time_in_minutes),
                     total_parts_cost=COALESCE(?, total_parts_cost),
@@ -3500,20 +3537,48 @@ def main():
         print(json.dumps({"inventory_id": iid, "part_name": iname}))
 
     elif command == "complete":
-        # complete <job_id> [time_in_minutes]
-        if len(sys.argv) < 3:
-            print(json.dumps({"error": "Usage: vehicle_db.py complete <job_id> [time_in_minutes]"}))
+        # complete <job_ref> [time_in_minutes] [--correct --reason "why"]
+        args = sys.argv[2:]
+        if not args:
+            print(json.dumps({"error":
+                "Usage: vehicle_db.py complete <job_ref> [time_in_minutes] "
+                "[--correct --reason \"why\"]"}))
             sys.exit(1)
-        jid = int(sys.argv[2])
-        mins = float(sys.argv[3]) if len(sys.argv) > 3 else None
-        result = complete_job(jid, time_in_minutes=mins)
+        correct = "--correct" in args
+        args = [a for a in args if a != "--correct"]
+        reason = None
+        if "--reason" in args:
+            _i = args.index("--reason")
+            reason = " ".join(args[_i + 1:]).strip() or None
+            args = args[:_i]
+        jid = int(args[0])
+        mins = float(args[1]) if len(args) > 1 else None
+        result = complete_job(jid, time_in_minutes=mins, correct=correct, reason=reason)
         if result == 0:
             print(json.dumps({"error": f"Job {jid} not found"}))
+        elif result == 3:
+            conn = get_connection()
+            recorded = conn.execute(
+                "SELECT time_in_minutes FROM jobs WHERE id=?", (jid,)).fetchone()
+            conn.close()
+            print(json.dumps({
+                "error": (
+                    "Job %s is already complete, with %s minutes recorded. Billed time "
+                    "does not move on a second complete call — it feeds pay and the "
+                    "weekly report. If this is a deliberate correction, re-run with "
+                    "--correct --reason \"why\"."
+                    % (jid, recorded["time_in_minutes"] if recorded else "?")),
+                "recorded_minutes": recorded["time_in_minutes"] if recorded else None,
+            }))
+            sys.exit(1)
         elif result == 2:
             print(json.dumps({
                 "completed": jid,
                 "time_in_minutes": mins,
-                "warning": "Job was already complete. Original end_date preserved. Time/cost updated if provided."
+                "corrected": correct,
+                "note": ("Job was already complete. end_date preserved. "
+                         + ("Billed values corrected and recorded in `deletions`."
+                            if correct else "No billed value changed.")),
             }))
         else:
             print(json.dumps({"completed": jid, "time_in_minutes": mins}))

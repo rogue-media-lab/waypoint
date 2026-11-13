@@ -60,17 +60,37 @@ def test_null_vin_dedups_on_year_make_model(module, db):
     assert second_status == "existing"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="complete on an already-complete job rewrites time_in_minutes while "
-    "the warning claims it only preserved end_date; billed time must be immutable",
-)
 def test_closed_job_time_is_immutable(module, db, row):
+    """A second `complete` must not rewrite billed time.
+
+    This was an xfail: the second call overwrote `time_in_minutes` through
+    COALESCE, so re-running `complete` on a closed job silently moved recorded
+    hours — and therefore pay and the weekly report. It is refused now.
+    """
     vid, _ = module.find_or_create_vehicle(None, 2018, "Ford", "Escape")
     jid = module.add_job(vid, "Head gasket replacement", booked_minutes=1320)
     module.complete_job(jid, time_in_minutes=24)
-    module.complete_job(jid, time_in_minutes=30)  # second call, job already closed
+    result = module.complete_job(jid, time_in_minutes=30)  # job already closed
+    assert result == 3, "a change to a closed job's billed time must be refused"
     assert row("SELECT time_in_minutes FROM jobs WHERE id=?", (jid,))[0] == 24
+
+
+def test_closed_job_correction_is_allowed_and_recorded(module, db, row):
+    """The deliberate correction path still works — and leaves an audit row."""
+    vid, _ = module.find_or_create_vehicle(None, 2018, "Ford", "Escape")
+    jid = module.add_job(vid, "Head gasket replacement", booked_minutes=1320)
+    module.complete_job(jid, time_in_minutes=24)
+
+    result = module.complete_job(jid, time_in_minutes=30, correct=True,
+                                 reason="clock stopped early, actual was 30")
+    assert result == 2
+    assert row("SELECT time_in_minutes FROM jobs WHERE id=?", (jid,))[0] == 30
+
+    logged = row("SELECT snapshot, reason FROM deletions "
+                 "WHERE entity='job_billed_correction' AND job_id=?", (jid,))
+    assert logged is not None, "the correction must be recorded"
+    assert "24" in logged[0] and "30" in logged[0]
+    assert "clock stopped early" in logged[1]
 
 
 @pytest.mark.xfail(
