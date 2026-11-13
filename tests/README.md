@@ -29,9 +29,10 @@ Expected: `47 passed, 7 xfailed`.
 1. **Assert on the database row, not the function's return value.** The CLI has
    echoed values it failed to store; a stdout assertion can pass while the
    write is missing. The `row` fixture reads straight from SQLite.
-2. **Sandbox with `WAYPOINT_PATHS_CONFIG`, not `WAYPOINT_DB`.** The latter is
-   documented in the README and AGENTS.md but is not implemented — the module
-   reads its path from `waypoint_paths.yaml` at import time.
+2. **Sandbox with `WAYPOINT_PATHS_CONFIG`.** `WAYPOINT_DB` is implemented now and
+   it **outranks** the path config, so `conftest.py` strips it from the
+   environment — an ambient one would silently defeat every sandbox and could
+   point a test run at a real database.
 
 ## The xfail list
 
@@ -41,15 +42,23 @@ and delete the marker, not to relax strictness.
 
 Current known defects:
 
-1. `WAYPOINT_DB` is never read; `waypoint_paths.yaml` is the only source of truth.
-2. `find-or-create` with a NULL VIN never dedups, contrary to AGENTS.md.
-3. `complete` on an already-complete job rewrites `time_in_minutes`, while the
-   warning says it only preserved `end_date`. Billed time should be immutable.
-4. `all_labor_times` filters only when make, model and year are all supplied; a
-   partial filter silently returns all 79 rows.
-5. The README documents ~20 of 49 dispatched commands, including omitting
+1. `find-or-create` with a NULL VIN never dedups, contrary to AGENTS.md.
+2. `all_labor_times` filters only when make, model and year are all supplied; a
+   partial filter silently returns every row.
+3. The README documents ~20 of 49 dispatched commands, including omitting
    `book`, which the README's own demo output depends on.
-6. A fresh `init` creates 17 tables, not the documented 28 (+`sqlite_sequence`);
-   the rest arrive from the `ensure_*` migration helpers on first use.
-7. `waypoint_export_cloud.py` hardcodes `SRC` instead of reading the path config,
+4. A fresh `init` creates 17 tables, not the documented 28; the rest arrive from
+   the `ensure_*` migration helpers on first use.
+5. `waypoint_export_cloud.py` hardcodes `SRC` instead of reading the path config,
    which the config file itself says scripts must never do.
+
+### Fixed, and their markers removed
+
+Two entries left this list by being fixed rather than by being reclassified —
+both were documented-but-unenforced, which is the pattern that produced the
+2026-11-11 wrong-job write:
+
+- **`WAYPOINT_DB` is read now** and outranks the path config.
+- **A closed job's `time_in_minutes` no longer moves.** A second `complete` that
+  would change it is refused; a deliberate correction needs
+  `--correct --reason "why"` and lands in the `deletions` audit table.

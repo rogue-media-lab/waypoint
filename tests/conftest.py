@@ -3,9 +3,12 @@
 The suite is deliberately hermetic: every test runs against a throwaway copy of
 the seed database, never ~/.hermes/data/vehicle_data.db. That matters more here
 than in a typical project, because the scripts write on import-adjacent code
-paths (ensure_* helpers ALTER tables) and because the documented WAYPOINT_DB
-override does not actually work (see tests/test_known_defects.py). The only
-override that does work is WAYPOINT_PATHS_CONFIG, so that is what we use.
+paths (ensure_* helpers ALTER tables).
+
+Sandboxing uses WAYPOINT_PATHS_CONFIG. WAYPOINT_DB is implemented and outranks
+the config, so this file strips it from the environment — an ambient one would
+silently defeat the sandbox, and against a writable path it could let a test run
+write into a real database.
 """
 
 import os
@@ -48,6 +51,11 @@ _SESSION_DIR = Path(tempfile.mkdtemp(prefix="waypoint-tests-"))
 _SESSION_DB = _SESSION_DIR / "session.db"
 shutil.copy(SEED, _SESSION_DB)
 os.environ["WAYPOINT_PATHS_CONFIG"] = str(write_paths_config(_SESSION_DIR, _SESSION_DB))
+# WAYPOINT_DB beats the path config by design, so an ambient one would silently
+# redirect every test that shells out at whatever database it names — and with a
+# writable path it could write entries into a real database. This suite sandboxes
+# with WAYPOINT_PATHS_CONFIG, so WAYPOINT_DB must not be in scope at all.
+os.environ.pop("WAYPOINT_DB", None)
 
 sys.path.insert(0, str(SCRIPTS))
 import vehicle_db
@@ -91,6 +99,9 @@ def cli(tmp_path):
     shutil.copy(SEED, db_path)
     config = write_paths_config(tmp_path, db_path)
     env = {**os.environ, "WAYPOINT_PATHS_CONFIG": str(config)}
+    # Never let an ambient WAYPOINT_DB redirect a subprocess — it outranks the
+    # config, so the sandbox would be defeated silently.
+    env.pop("WAYPOINT_DB", None)
 
     def run(*args):
         return subprocess.run(
